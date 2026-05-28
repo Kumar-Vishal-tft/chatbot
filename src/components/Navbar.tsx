@@ -8,11 +8,14 @@ import {
 } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import ThemeToggle from './ThemeToggle';
+import { useWakeLock } from '@/hooks/useWakeLock';
 
 export default function Navbar() {
   const { isVerified, userName, onboardingStep, clearAllChats, startOnboardingConversation } = useChatStore();
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
+  
+  const { isSupported: isWakeLockSupported, isActive: isWakeLockActive, isEnabled: isWakeLockEnabled, toggleKeepAwake } = useWakeLock();
 
   // Close dropdown on outside clicks
   useEffect(() => {
@@ -122,6 +125,45 @@ export default function Navbar() {
                   </button>
                 </div>
               )}
+              {/* Keep Screen Awake Toggle Option */}
+              <div className="flex flex-col gap-1.5 border-t border-black/5 dark:border-white/5 pt-2.5 mt-1">
+                <span className="text-[9px] font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider pl-2.5">
+                  Device Controls
+                </span>
+                <div className="w-full flex items-center justify-between py-1.5 px-2.5 rounded-xl hover:bg-neutral-50 dark:hover:bg-neutral-900/40 text-xs transition-colors">
+                  <span className="flex items-center gap-2 font-bold text-neutral-700 dark:text-neutral-300">
+                    <ShieldCheck className={`w-4 h-4 transition-colors ${isWakeLockActive ? 'text-emerald-500' : 'text-neutral-400'}`} />
+                    Keep Screen Awake
+                  </span>
+                  
+                  {/* Switch Toggle */}
+                  <button
+                    onClick={toggleKeepAwake}
+                    disabled={!isWakeLockSupported}
+                    className={`w-9 h-5 rounded-full p-0.5 transition-colors duration-300 cursor-pointer ${
+                      isWakeLockEnabled ? 'bg-emerald-500' : 'bg-neutral-200 dark:bg-neutral-800'
+                    } disabled:opacity-40 disabled:cursor-not-allowed`}
+                    title={isWakeLockSupported ? "Toggle keeping screen active" : "Wake Lock not supported on this browser"}
+                  >
+                    <div className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-300 transform ${
+                      isWakeLockEnabled ? 'translate-x-4' : 'translate-x-0'
+                    }`} />
+                  </button>
+                </div>
+                {!isWakeLockSupported && (
+                  <span className="text-[9px] font-medium text-red-500 pl-2.5 -mt-1 leading-normal">
+                    Not supported by your browser
+                  </span>
+                )}
+                {isWakeLockSupported && (
+                  <div className="flex items-center gap-1.5 pl-2.5 mt-0.5">
+                    <span className={`w-1.5 h-1.5 rounded-full ${isWakeLockActive ? 'bg-emerald-500 animate-pulse' : 'bg-neutral-300'}`} />
+                    <span className="text-[9px] font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
+                      {isWakeLockActive ? 'Active' : 'Inactive / Backgrounded'}
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

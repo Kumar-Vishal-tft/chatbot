@@ -5,6 +5,7 @@ import { Mic, X, Play, Pause, Volume2, VolumeX, AlertCircle } from 'lucide-react
 import { motion, AnimatePresence } from 'framer-motion';
 import { GoogleGenAI, Modality } from "@google/genai";
 import { YHEALTH_PERSONA } from './persona';
+import { useWakeLock } from '@/hooks/useWakeLock';
 
 // Types of voice states
 export type VoiceState = 'idle' | 'connecting' | 'listening' | 'paused' | 'thinking' | 'speaking' | 'error';
@@ -31,6 +32,21 @@ export default function VoiceAssistantPanel({
   const [transcript, setTranscript] = useState('');
   const [showConfirmClose, setShowConfirmClose] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+
+  // Screen Wake Lock support
+  const { requestWakeLock, releaseWakeLock } = useWakeLock();
+
+  // Keep screen awake while voice panel is active
+  useEffect(() => {
+    if (isOpen) {
+      requestWakeLock();
+    } else {
+      releaseWakeLock();
+    }
+    return () => {
+      releaseWakeLock();
+    };
+  }, [isOpen, state, requestWakeLock, releaseWakeLock]);
 
   // Audio refs
   const playbackCtxRef = useRef<AudioContext | null>(null);
