@@ -231,7 +231,7 @@ export default function Home() {
   ═══════════════════════════════════════════ */
   return (
     <motion.div key="chat" {...pageIn}
-      className="flex flex-col h-screen min-h-[100dvh] w-screen overflow-hidden text-[#111111] dark:text-[#c0c0c0] transition-colors duration-300 gradient-bg"
+      className="flex flex-col h-[100dvh] w-screen overflow-hidden text-[#111111] dark:text-[#c0c0c0] transition-colors duration-300 gradient-bg"
     >
       {/* Navbar */}
       <Navbar />

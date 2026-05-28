@@ -11,6 +11,12 @@ export const metadata = {
   description: 'Premium AI chatbot interface for YHealth/YoloMed platform',
 };
 
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+};
+
 export default function RootLayout({
   children,
 }: {
@@ -38,7 +44,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className={`${inter.variable} font-sans bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-50 h-screen overflow-hidden antialiased transition-colors duration-200`}>
+      <body className={`${inter.variable} font-sans bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-50 h-[100dvh] overflow-hidden antialiased transition-colors duration-200`}>
         {children}
       </body>
     </html>
