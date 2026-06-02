@@ -56,9 +56,57 @@ const RETURNING_SUGGESTIONS = [
   { id: 'timeline',  title: 'Consultation timeline',     description: 'View your full clinical history.',          prompt: 'Show my consultation timeline',    icon: User,        accent: 'group-hover:bg-amber-50 dark:group-hover:bg-amber-950/20',  iconAccent: 'group-hover:text-amber-600 dark:group-hover:text-amber-400' },
 ];
 
+import { CAMPAIGN_CONFIG } from '@/store/campaign-config';
+import { captureAnalyticsEvent } from '@/utils/analytics';
+
 export default function PromptCards({ onVerify, isVerified = false, verifiedName, hideExistingCard = false }: PromptCardsProps) {
   const { sendMessage } = useChatStore();
-  const suggestions = isVerified ? RETURNING_SUGGESTIONS : BASE_SUGGESTIONS;
+
+  // Resolve suggestions based on campaign configuration
+  let suggestions = BASE_SUGGESTIONS;
+  let activeCampaign = 'metabolic_health';
+  let activePersona = 'metabolic_agent';
+  let activeProgram = 'metabolic';
+
+  if (typeof window !== 'undefined') {
+    const utmCampaign = sessionStorage.getItem('utm_campaign') || 'metabolic_health';
+    const config = CAMPAIGN_CONFIG[utmCampaign] || CAMPAIGN_CONFIG.metabolic_health;
+    if (config) {
+      activeCampaign = utmCampaign;
+      activePersona = config.persona;
+      activeProgram = config.programId;
+      
+      if (!isVerified) {
+        const icons = [FileText, Apple, HeartPulse, Stethoscope];
+        const accents = [
+          'group-hover:bg-blue-50 dark:group-hover:bg-blue-950/20',
+          'group-hover:bg-green-50 dark:group-hover:bg-green-950/20',
+          'group-hover:bg-red-50 dark:group-hover:bg-red-950/20',
+          'group-hover:bg-purple-50 dark:group-hover:bg-purple-950/20'
+        ];
+        const iconAccents = [
+          'group-hover:text-blue-600 dark:group-hover:text-blue-400',
+          'group-hover:text-green-600 dark:group-hover:text-green-400',
+          'group-hover:text-red-500 dark:group-hover:text-red-400',
+          'group-hover:text-purple-600 dark:group-hover:text-purple-400'
+        ];
+
+        suggestions = config.cards.map((c, idx) => ({
+          id: `card_${idx}`,
+          title: c.title,
+          description: c.subtitle,
+          prompt: c.prompt,
+          icon: icons[idx % icons.length],
+          accent: accents[idx % accents.length],
+          iconAccent: iconAccents[idx % iconAccents.length]
+        }));
+      }
+    }
+  }
+
+  if (isVerified) {
+    suggestions = RETURNING_SUGGESTIONS;
+  }
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-3.5 w-full px-4 md:px-0 max-w-[1100px] mx-auto flex-shrink min-h-0">
@@ -68,6 +116,15 @@ export default function PromptCards({ onVerify, isVerified = false, verifiedName
           <button
             key={card.id ?? idx}
             onClick={() => {
+              // Capture card click event in analytics
+              captureAnalyticsEvent('card_click', {
+                utm_campaign: activeCampaign,
+                persona: activePersona,
+                program: activeProgram,
+                card_title: card.title,
+                card_prompt: 'prompt' in card ? card.prompt : ''
+              });
+
               if ('prompt' in card && card.prompt) sendMessage(card.prompt);
             }}
             className={`group text-left p-3.5 md:p-4 rounded-[18px]
@@ -113,3 +170,4 @@ export default function PromptCards({ onVerify, isVerified = false, verifiedName
     </div>
   );
 }
+

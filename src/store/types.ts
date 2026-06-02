@@ -18,6 +18,7 @@ export interface ChatSession {
 export interface OnboardingProfile {
   name?: string;
   age?: string;
+  phone_number?: string;
   gender?: string;
   health_goal?: string;
   conditions?: string[];
@@ -28,10 +29,10 @@ export type OnboardingStep =
   | 'not_started'
   | 'asked_name'
   | 'asked_age'
+  | 'asked_phone'
   | 'asked_gender'
   | 'asked_goal'
   | 'asked_conditions'
-  | 'asked_verify'
   | 'completed';
 
 // Tracks what type the last bot message was — used to prevent duplicate greetings/questions
@@ -69,6 +70,14 @@ export interface ChatState {
   isExistingPatient: boolean;
   isVerified: boolean;
   userName: string;
+  userType?: 'guest' | 'existing';
+  personaLoaded?: boolean;
+  persona?: any | null;
+  sessionId?: string | null;
+  utm_campaign?: string | null;
+  utm_source?: string | null;
+  utm_medium?: string | null;
+  isProgramActivated?: boolean;
 
   // Conversation State
   greetingShown: boolean;           // true after first welcome message is displayed
@@ -93,7 +102,9 @@ export interface ChatState {
   setIsExistingPatient: (val: boolean) => void;
   setIsVerified: (val: boolean) => void;
   setUserName: (name: string) => void;
-  restoreExistingUser: (name: string, phone: string) => void;
+  restoreExistingUser: (name: string, phone: string, persona?: any, sessionId?: string) => void | Promise<void>;
+
   startOnboardingConversation: () => void;
   loadPersistedChats: () => void;
+  activateProgram?: () => void;
 }

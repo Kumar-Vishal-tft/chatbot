@@ -9,9 +9,13 @@
 
 import { create } from 'zustand';
 import { ChatState, ChatSession, Message, LastBotMessageType } from './types';
-import { saveChatState, isLikelyGibberish, isGreetingOrFiller } from './utils';
+import { saveChatState, syncSessionWithRedis, syncConversationWithBackend, isLikelyGibberish, isGreetingOrFiller, generateUUID } from './utils';
+
 import { fetchGeminiResponse, fetchGreetingResponse, verifyUserData } from './api';
 import { RESTORED_SESSIONS, RESTORED_MESSAGES } from './constants';
+import { activePersonaManager } from '@/persona/PersonaManager';
+import { CAMPAIGN_CONFIG } from './campaign-config';
+import { captureAnalyticsEvent } from '@/utils/analytics';
 
 // Re-exports used by components
 export { getTimeBasedGreeting, isLikelyGibberish } from './utils';
@@ -34,6 +38,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isExistingPatient: false,
   isVerified: false,
   userName: '',
+  sessionId: null,
+  utm_campaign: null,
+  utm_source: null,
+  utm_medium: null,
+  isProgramActivated: false,
 
   // ── Conversation State ────────────────────────────────────────────────────
   greetingShown: false,
@@ -69,10 +78,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setActiveChatId: (id) => {
     set({ activeChatId: id });
     saveChatState(get().chatSessions, get().messages, id);
+    syncSessionWithRedis(get().chatSessions, get().messages, id);
   },
 
   createNewChat: (initialMessage) => {
-    const id = Math.random().toString(36).substring(7);
+    const id = generateUUID();
     const time = new Date();
 
     const newSession: ChatSession = {
@@ -89,6 +99,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const nextSessions = [newSession, ...state.chatSessions];
       const nextMessages = { ...state.messages, [id]: [] };
       saveChatState(nextSessions, nextMessages, id);
+      syncSessionWithRedis(nextSessions, nextMessages, id);
       return { chatSessions: nextSessions, activeChatId: id, messages: nextMessages };
     });
 
@@ -108,8 +119,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             : null
           : state.activeChatId;
       saveChatState(filteredSessions, updatedMessages, nextActiveId);
+      syncSessionWithRedis(filteredSessions, updatedMessages, nextActiveId);
       return { chatSessions: filteredSessions, messages: updatedMessages, activeChatId: nextActiveId };
     }),
+
 
   clearAllChats: () => {
     if (typeof window !== 'undefined') {
@@ -127,6 +140,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isVerified: false,
       isExistingPatient: false,
       userName: '',
+      sessionId: null,
       greetingShown: false,
       lastBotMessageType: 'none',
     });
@@ -173,8 +187,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => {
       const nextMessages = { ...state.messages, [chatId!]: [...(state.messages[chatId!] || []), userMessage] };
       saveChatState(state.chatSessions, nextMessages, chatId);
+      syncSessionWithRedis(state.chatSessions, nextMessages, chatId);
       return { messages: nextMessages, isTyping: true };
     });
+
 
     const timer = setTimeout(async () => {
       if (!chatId) return;
@@ -205,11 +221,13 @@ Could you rephrase that? Try something like:
         const isFirstTime = !greetingShown;
         const history = get().messages[chatId] || [];
 
+        const hasPersona = !!get().persona || !!activePersonaManager.getRawPersona();
         const greetingText = await fetchGreetingResponse(
           content,
           isFirstTime,
           userName || undefined,
-          history.slice(0, -1) // exclude the greeting message just added
+          history.slice(-11, -1), // exclude the greeting message just added and keep last 5 turns (10 messages)
+          hasPersona
         );
 
         const isOnboardingInProgress = !isVerified && onboardingStep !== 'completed' && onboardingStep !== 'not_started';
@@ -221,14 +239,14 @@ Could you rephrase that? Try something like:
             activeQuestion = `**What should I call you?**`;
           } else if (onboardingStep === 'asked_age') {
             activeQuestion = `**How old are you?** *(This helps me give you better guidance)*`;
+          } else if (onboardingStep === 'asked_phone') {
+            activeQuestion = `**What is your mobile/phone number?** *(This helps me save your secure progress)*`;
           } else if (onboardingStep === 'asked_gender') {
             activeQuestion = `**What's your gender?**\n\n[FollowUps: Male | Female | Prefer not to say]`;
           } else if (onboardingStep === 'asked_goal') {
             activeQuestion = `**What would you most like help with?**\n\n[FollowUps: Weight loss | Diabetes | Blood reports | Nutrition | Fitness | General wellness]`;
           } else if (onboardingStep === 'asked_conditions') {
             activeQuestion = `**Do you have any existing medical conditions?** *(Type them out, or choose below)*\n\n[FollowUps: None | Diabetes | Hypertension | Asthma]`;
-          } else if (onboardingStep === 'asked_verify') {
-            activeQuestion = `**Would you like to save your profile by verifying your mobile number?**\n\n[FollowUps: Verify Now | Maybe Later]`;
           }
 
           // Strip any duplicate follow-ups if we are appending our own onboarding follow-up buttons
@@ -251,7 +269,7 @@ Could you rephrase that? Try something like:
         }
       }
 
-      // ── 3. Onboarding in progress (name → age → gender → goal → conditions → verify) ──
+      // ── 3. Onboarding in progress (name → age → phone → gender → goal → conditions → complete) ──
       else if (!isVerified && onboardingStep !== 'completed' && onboardingStep !== 'not_started') {
 
         if (onboardingStep === 'asked_name') {
@@ -292,7 +310,23 @@ Could you rephrase that? Try something like:
             nextStep = 'asked_age';
           } else {
             nextProfile.age = verification.parsedValue;
-            matchedResponse = `Got it — **${verification.parsedValue}** years old.\n\n**What's your gender?**\n\n[FollowUps: Male | Female | Prefer not to say]`;
+            matchedResponse = `Got it — **${verification.parsedValue}** years old.\n\n**What is your mobile/phone number?** *(This helps me save your secure progress)*`;
+            nextStep = 'asked_phone';
+            nextBotMessageType = 'onboarding_question';
+          }
+        }
+
+        else if (onboardingStep === 'asked_phone') {
+          const cleanedPhone = content.replace(/\D/g, '');
+          const isPhoneValid = cleanedPhone.length >= 10 && cleanedPhone.length <= 15;
+
+          if (!isPhoneValid) {
+            matchedResponse = `That doesn't look like a valid phone number. **Please share your 10-digit mobile number** so I can save your progress securely.`;
+            nextBotMessageType = 'onboarding_question';
+            nextStep = 'asked_phone';
+          } else {
+            nextProfile.phone_number = content.trim();
+            matchedResponse = `Perfect, got your contact number! 🙌\n\n**What's your gender?**\n\n[FollowUps: Male | Female | Prefer not to say]`;
             nextStep = 'asked_gender';
             nextBotMessageType = 'onboarding_question';
           }
@@ -316,21 +350,14 @@ Could you rephrase that? Try something like:
           nextProfile.conditions = content.toLowerCase().includes('none')
             ? []
             : content.split(',').map((c) => c.trim());
-          matchedResponse = `Got it! **Would you like to save your profile by verifying your mobile number?**\n\n[FollowUps: Verify Now | Maybe Later]`;
-          nextStep = 'asked_verify';
-          nextBotMessageType = 'onboarding_question';
-        }
 
-        else if (onboardingStep === 'asked_verify') {
-          if (content.toLowerCase().includes('verify now')) {
-            matchedResponse = `Tap "Verify Mobile Number" in the bottom panel or the top-right menu to complete verification.`;
-          } else {
-            const conditionsSummary =
-              nextProfile.conditions && nextProfile.conditions.length > 0
-                ? nextProfile.conditions.join(', ')
-                : 'None mentioned';
-            matchedResponse = `You're all set, **${nextProfile.name || 'there'}**!\n\nHere's a quick look at your profile:\n*   **Age / Gender:** ${nextProfile.age || '—'} / ${nextProfile.gender || '—'}\n*   **Health Goal:** ${nextProfile.health_goal || 'General wellness'}\n*   **Conditions:** ${conditionsSummary}\n\n[HealthCardsGrid: Metabolic Rate=Active=healthy | Profile=Complete=healthy]\n\nWhat would you like to explore today?\n\n[FollowUps: Check Symptoms | Analyze Report | Diet Guidance | Medicine Help]`;
-          }
+          const conditionsSummary =
+            nextProfile.conditions && nextProfile.conditions.length > 0
+              ? nextProfile.conditions.join(', ')
+              : 'None mentioned';
+
+          matchedResponse = `You're all set, **${nextProfile.name || 'there'}**! 🎉\n\nHere's a quick look at your profile:\n*   **Age / Gender:** ${nextProfile.age || '—'} / ${nextProfile.gender || '—'}\n*   **Phone:** ${nextProfile.phone_number || '—'}\n*   **Health Goal:** ${nextProfile.health_goal || 'General wellness'}\n*   **Conditions:** ${conditionsSummary}\n\n[HealthCardsGrid: Metabolic Rate=Active=healthy | Profile=Complete=healthy]\n\nWhat would you like to explore today?\n\n[FollowUps: Check Symptoms | Analyze Report | Diet Guidance | Medicine Help]`;
+          
           nextStep = 'completed';
           nextBotMessageType = 'onboarding_complete';
 
@@ -341,6 +368,37 @@ Could you rephrase that? Try something like:
               onboarding: nextProfile,
             }));
           }
+
+          // Forward captured guest user onboarding profile details to leads backend API proxy
+          const sessionUUID = get().sessionId || get().activeChatId || '';
+          const ageNum = parseInt(String(nextProfile.age)) || 0;
+          
+          fetch('/api/leads', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              session_id: sessionUUID,
+              name: nextProfile.name || '',
+              age: ageNum,
+              phone_number: nextProfile.phone_number || '',
+              gender: nextProfile.gender || '',
+              additional_details: {
+                health_goal: nextProfile.health_goal || 'General wellness',
+                conditions: nextProfile.conditions || [],
+                utm_campaign: get().utm_campaign || sessionStorage.getItem('utm_campaign') || 'metabolic_health',
+              }
+            })
+          })
+            .then(async (res) => {
+              if (res.ok) {
+                console.log('Lead captured and sent to backend successfully:', await res.json());
+              } else {
+                console.warn('Failed to send lead to backend:', res.status, await res.text());
+              }
+            })
+            .catch((err) => console.warn('Error sending lead data:', err));
         }
 
         set({ onboardingStep: nextStep, onboardingProfile: nextProfile });
@@ -365,9 +423,18 @@ Could you rephrase that? Try something like:
       // ── 5. Active chat (onboarding complete OR verified) ─────────────────
       else {
         const history = get().messages[chatId] || [];
-        matchedResponse = await fetchGeminiResponse(content, history.slice(0, -1), onboardingProfile);
+        matchedResponse = await fetchGeminiResponse(content, history.slice(-11, -1), onboardingProfile); // keep last 5 turns (10 messages) of context
         nextBotMessageType = 'health_reply';
       }
+
+      // ── 6. Bulletproof CTA Fallback Safeguard (Guarantees every reply has CTA) ──
+      if (matchedResponse && !/\[FollowUps:\s*([^\]]+)\]/i.test(matchedResponse)) {
+        const campaignKey = get().utm_campaign || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_campaign') : null) || 'metabolic_health';
+        const config = CAMPAIGN_CONFIG[campaignKey] || CAMPAIGN_CONFIG.metabolic_health;
+        const followUpsText = config.suggestedPrompts.join(' | ');
+        matchedResponse += `\n\n[FollowUps: ${followUpsText}]`;
+      }
+
 
       // ── Stream the response character-by-character ─────────────────────
       const assistantMessageId = Math.random().toString(36).substring(7);
@@ -381,6 +448,7 @@ Could you rephrase that? Try something like:
       set((state) => {
         const nextMessages = { ...state.messages, [chatId!]: [...(state.messages[chatId!] || []), assistantMessage] };
         saveChatState(state.chatSessions, nextMessages, chatId);
+        syncSessionWithRedis(state.chatSessions, nextMessages, chatId);
         return {
           isTyping: false,
           streamingMessageId: assistantMessageId,
@@ -397,6 +465,7 @@ Could you rephrase that? Try something like:
           clearInterval(interval);
           set({ streamingMessageId: null, activeIntervalId: null });
           saveChatState(get().chatSessions, get().messages, get().activeChatId);
+          syncSessionWithRedis(get().chatSessions, get().messages, get().activeChatId);
         } else {
           currentIdx += Math.min(Math.floor(Math.random() * 4) + 6, responseLength - currentIdx);
           const slicedText = matchedResponse.substring(0, currentIdx);
@@ -426,23 +495,107 @@ Could you rephrase that? Try something like:
     }
     set({ activeIntervalId: null, streamingMessageId: null, isTyping: false });
     saveChatState(get().chatSessions, get().messages, get().activeChatId);
+    syncSessionWithRedis(get().chatSessions, get().messages, get().activeChatId);
   },
 
   // ── Restore Existing Patient ──────────────────────────────────────────────
-  restoreExistingUser: (name) => {
+  restoreExistingUser: async (name, phone, personaData, sessionId) => {
     const capitalizedName = name.split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    
+    // Load the persona data into our optimized singleton manager
+    if (personaData) {
+      activePersonaManager.loadPersona(personaData);
+    }
+
+    const resolvedSessionId = sessionId || phone; // use phone number as session identifier fallback if sessionId is null
+
     set({
       isVerified: true,
       isExistingPatient: true,
+      userType: 'existing',
+      personaLoaded: !!personaData,
+      persona: personaData || null,
+      sessionId: resolvedSessionId,
       userName: capitalizedName,
       onboardingStep: 'completed',
       greetingShown: true,
       lastBotMessageType: 'onboarding_complete',
-      chatSessions: RESTORED_SESSIONS,
-      messages: RESTORED_MESSAGES,
-      activeChatId: RESTORED_SESSIONS[0].id,
     });
-    saveChatState(RESTORED_SESSIONS, RESTORED_MESSAGES, RESTORED_SESSIONS[0].id);
+
+    try {
+      // 1. Try to load patient chat and queries record from Redis cache database
+      const res = await fetch(`/api/session/load?sessionId=${resolvedSessionId}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.sessions && data.sessions.length > 0) {
+          const activeId = data.sessions[0].id;
+          set({
+            chatSessions: data.sessions,
+            messages: data.messages,
+            activeChatId: activeId,
+          });
+          // Sync to local storage to maintain synchronization
+          saveChatState(data.sessions, data.messages, activeId);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to restore patient history from Redis, falling back to campaign welcome:', err);
+    }
+
+    // 2. Fallback: No history in Redis. Create fresh "welcome back" session
+    const newChatId = generateUUID();
+    const newSession = {
+      id: newChatId,
+      title: 'Active Health Companion',
+      timestamp: new Date().toLocaleDateString([], { month: 'short', day: 'numeric' }),
+    };
+
+    // Compile welcome message dynamically based on resolved campaign
+    const utmCampaign = get().utm_campaign || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_campaign') : null) || 'metabolic_health';
+    const config = CAMPAIGN_CONFIG[utmCampaign] || CAMPAIGN_CONFIG.metabolic_health;
+    const firstName = capitalizedName.split(' ')[0] || 'Lisha';
+    const welcomeTemplateText = config.welcomeTemplate(firstName);
+    const followUpsText = config.suggestedPrompts.join(' | ');
+
+    const welcomeMsg: Message = {
+      id: Math.random().toString(36).substring(7),
+      sender: 'assistant',
+      content: `Welcome back, ${capitalizedName}! 👋\n\n${welcomeTemplateText}\n\n[FollowUps: ${followUpsText}]`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+
+    set({
+      chatSessions: [newSession],
+      messages: { [newChatId]: [welcomeMsg] },
+      activeChatId: newChatId,
+    });
+    saveChatState([newSession], { [newChatId]: [welcomeMsg] }, newChatId);
+    syncSessionWithRedis([newSession], { [newChatId]: [welcomeMsg] }, newChatId);
+  },
+
+
+  // ── Activate Tenant A Program CTA ──────────────────────────────────────────
+  activateProgram: () => {
+    const campaignKey = get().utm_campaign || 'metabolic_health';
+    const config = CAMPAIGN_CONFIG[campaignKey] || CAMPAIGN_CONFIG.metabolic_health;
+    
+    set({ isProgramActivated: true });
+    
+    // Capture the primary Tenant A attribution and activation events
+    captureAnalyticsEvent('consultation_booked', {
+      utm_campaign: campaignKey,
+      persona: config.persona,
+      program: config.programId,
+      cta_text: config.ctaText
+    });
+    
+    captureAnalyticsEvent('program_activated', {
+      utm_campaign: campaignKey,
+      persona: config.persona,
+      program: config.programId,
+      cta_text: config.ctaText
+    });
   },
 
   // ── Start New User Onboarding ──────────────────────────────────────────────
@@ -464,28 +617,90 @@ Could you rephrase that? Try something like:
       set((state) => {
         const nextMessages = { ...state.messages, [chatId]: [welcomeMsg] };
         saveChatState(state.chatSessions, nextMessages, chatId);
+        syncSessionWithRedis(state.chatSessions, nextMessages, chatId);
         return { messages: nextMessages, lastBotMessageType: 'greeting' as LastBotMessageType };
       });
     }, 400);
   },
 
-
-  // ── Load Persisted Chats from localStorage ────────────────────────────────
-  loadPersistedChats: () => {
+  // ── Load Persisted Chats from Redis & localStorage ────────────────────────
+  loadPersistedChats: async () => {
     if (typeof window === 'undefined') return;
     try {
       const savedSessions = localStorage.getItem('yhealth_chat_sessions');
       const savedMessages = localStorage.getItem('yhealth_chat_messages');
       const savedActiveId = localStorage.getItem('yhealth_active_chat_id');
+      
+      // 1. Initial immediate hydration from local cache
       if (savedSessions && savedMessages) {
         set({
           chatSessions: JSON.parse(savedSessions),
           messages: JSON.parse(savedMessages),
           activeChatId: savedActiveId || null,
         });
+        
+        // Fetch latest server state from Redis to synchronize multi-device session
+        const sessionId = savedActiveId || localStorage.getItem('yhealth_active_chat_id');
+        if (sessionId) {
+          const res = await fetch(`/api/session/load?sessionId=${sessionId}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && data.sessions && data.sessions.length > 0) {
+              set({
+                chatSessions: data.sessions,
+                messages: data.messages,
+              });
+              // Update local cache to be in sync
+              saveChatState(data.sessions, data.messages, sessionId);
+            }
+          }
+        }
+      } else {
+        // Brand new user arrives! Generate a secure RFC4122 UUID session ID immediately
+        const newGuestSessionId = generateUUID();
+        
+        const newSession: ChatSession = {
+          id: newGuestSessionId,
+          title: 'Active Health Companion',
+          timestamp: new Date().toLocaleDateString([], { month: 'short', day: 'numeric' }),
+        };
+        
+        const initialMessages = { [newGuestSessionId]: [] };
+        
+        set({
+          chatSessions: [newSession],
+          messages: initialMessages,
+          activeChatId: newGuestSessionId,
+          sessionId: newGuestSessionId,
+        });
+        
+        // Save locally and cache immediately in Redis
+        saveChatState([newSession], initialMessages, newGuestSessionId);
+        await syncSessionWithRedis([newSession], initialMessages, newGuestSessionId);
+      }
+
+      // 3. Start continuous, non-blocking background sync loop to FastAPI backend every 15 minutes (900000ms)
+      if (typeof window !== 'undefined' && !(globalThis as any).__sync_loop_started__) {
+        (globalThis as any).__sync_loop_started__ = true;
+        
+        const runSyncLoop = async () => {
+          try {
+            const { messages, activeChatId } = get();
+            await syncConversationWithBackend(messages, activeChatId);
+          } catch (err) {
+            console.error('Error in background sync loop:', err);
+          }
+          // Schedule next run continuously in 15 minutes
+          setTimeout(runSyncLoop, 15 * 60 * 1000);
+        };
+        
+        // Start the continuous recursive loop
+        runSyncLoop();
       }
     } catch (e) {
       console.error('Error loading persisted chats:', e);
     }
   },
 }));
+
+

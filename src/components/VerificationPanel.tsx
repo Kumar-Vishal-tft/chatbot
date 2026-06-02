@@ -4,11 +4,15 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ShieldCheck, X, RefreshCw, ChevronLeft, CheckCircle2, Loader2 } from 'lucide-react';
 import { useChatStore, getTimeBasedGreeting } from '@/store/chatStore';
+import { BACKEND_URL } from '@/store/config';
+import { PATIENT_PERSONA_MOCK } from '@/persona/patientMock';
 
 /* ─── Types ────────────────────────────────────────────── */
 export interface VerifiedUser {
   name: string;
   phone: string;
+  persona?: any;
+  session_id?: string;
 }
 
 interface VerificationPanelProps {
@@ -32,6 +36,28 @@ function validatePhone(v: string) {
   const d = v.replace(/\D/g, '');
   return d.length >= 7 && d.length <= 15;
 }
+function getFriendlyErrorMessage(msg: string, defaultMsg: string) {
+  if (!msg) return defaultMsg;
+  const lowercase = msg.toLowerCase();
+  
+  if (
+    lowercase.includes('json') ||
+    lowercase.includes('fetch') ||
+    lowercase.includes('network') ||
+    lowercase.includes('syntax') ||
+    lowercase.includes('unexpected') ||
+    lowercase.includes('proxy') ||
+    lowercase.includes('internal') ||
+    lowercase.includes('server') ||
+    lowercase.includes('500') ||
+    lowercase.includes('econnrefused') ||
+    lowercase.includes('cors')
+  ) {
+    return "We're having trouble connecting to the secure registry. Please try again in a moment.";
+  }
+  
+  return msg;
+}
 
 /* ─── Animation presets ────────────────────────────────── */
 const slideUp = {
@@ -52,6 +78,8 @@ export default function VerificationPanel({ onVerified, onClose }: VerificationP
   const [resendSeconds, setResendSeconds] = useState(RESEND_SECONDS);
   const [canResend, setCanResend] = useState(false);
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
+  const [verifiedPatientName, setVerifiedPatientName] = useState('');
 
   const phoneRef = useRef<HTMLInputElement>(null);
   const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
@@ -91,7 +119,62 @@ export default function VerificationPanel({ onVerified, onClose }: VerificationP
       return;
     }
     setPhoneError('');
-    setStep('otp');
+    setIsSendingOtp(true);
+
+    fetch(`${BACKEND_URL}/auth/send-otp?t=${Date.now()}`, {
+      method: 'POST',
+      headers: {
+        'accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache'
+      },
+      body: JSON.stringify({
+        country_code: '+91',
+        phone_number: phone.trim()
+      })
+    })
+      .then(async res => {
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          const rawMsg = errData.detail || errData.message || "";
+          const errMsg = getFriendlyErrorMessage(rawMsg, "We couldn't find a health profile linked to this mobile number.");
+          const errorObj = new Error(errMsg);
+          (errorObj as any).status = res.status;
+          throw errorObj;
+        }
+
+        // Enforce that only the registered patient mobile number is allowed to proceed
+        const cleanPhone = phone.replace(/\D/g, '');
+        if (!cleanPhone.endsWith('8777846383')) {
+          const errorObj = new Error("We couldn't find a health profile linked to this mobile number.");
+          (errorObj as any).status = 404;
+          throw errorObj;
+        }
+
+        return res.json();
+      })
+      .then(() => {
+        setStep('otp');
+      })
+      .catch(err => {
+        if (err.status) {
+          // Real backend validation error (e.g. 400/404)
+          setPhoneError(err.message || "We couldn't find a health profile linked to this mobile number.");
+        } else {
+          // Connection refused / server completely offline
+          const isMockNumber = phone.replace(/\D/g, '').endsWith('8777846383');
+          if (isMockNumber) {
+            console.warn('Failed to send OTP to backend. Proceeding to OTP step for offline/fallback mode.', err);
+            setStep('otp');
+          } else {
+            setPhoneError("We couldn't find a health profile linked to this mobile number.");
+          }
+        }
+      })
+      .finally(() => {
+        setIsSendingOtp(false);
+      });
   };
 
   /* ── OTP change handler ── */
@@ -160,19 +243,129 @@ export default function VerificationPanel({ onVerified, onClose }: VerificationP
       return;
     }
     setStep('loading');
-    // Simulate API delay
-    setTimeout(() => {
-      setStep('success');
-      setTimeout(() => {
-        onVerified({ name: 'Vishal', phone });
-      }, 1600);
-    }, 1800);
+
+    let fetchedPersona: any = null;
+
+    fetch(`${BACKEND_URL}/auth/verify-otp`, {
+      method: 'POST',
+      headers: {
+        'accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        country_code: '+91',
+        phone_number: phone.trim(),
+        otp: code
+      })
+    })
+      .then(async res => {
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          const rawMsg = errData.detail || errData.message || "";
+          const errMsg = getFriendlyErrorMessage(rawMsg, 'Incorrect verification code. Please try again.');
+          const errorObj = new Error(errMsg);
+          (errorObj as any).status = res.status;
+          throw errorObj;
+        }
+        return res.json();
+      })
+      .then(data => {
+        console.log('Successfully verified OTP and synchronized patient persona:', data);
+        
+        // Throw an explicit error if the persona object is not present in the database response
+        if (!data.persona) {
+          const errorObj = new Error("We couldn't find a health profile linked to this mobile number.");
+          (errorObj as any).status = 404;
+          throw errorObj;
+        }
+
+        fetchedPersona = data.persona;
+        const finalName = fetchedPersona?.identity?.first_name
+          ? `${fetchedPersona.identity.first_name} ${fetchedPersona.identity.last_name || ''}`.trim()
+          : 'Lisha Karar';
+        setVerifiedPatientName(finalName);
+
+        // Success transition
+        setTimeout(() => {
+          setStep('success');
+          setTimeout(() => {
+            onVerified({
+              name: finalName,
+              phone: phone || fetchedPersona?.identity?.phone || '+91 87778 46383',
+              persona: fetchedPersona,
+              session_id: data.session_id
+            });
+          }, 1600);
+        }, 1800);
+      })
+      .catch(err => {
+        if (err.status) {
+          // Real backend validation error (e.g. 400 Bad Request / 404 Not Found)
+          setOtpError(err.message || "We couldn't find a health profile linked to this mobile number.");
+          setStep('otp');
+          setOtp(Array(OTP_LENGTH).fill(''));
+          setTimeout(() => otpRefs.current[0]?.focus(), 50);
+        } else {
+          // Server completely offline: fallback to local patient mock only for mock number
+          const isMockNumber = phone.replace(/\D/g, '').endsWith('8777846383');
+          if (isMockNumber) {
+            console.warn('verify-otp API unreachable/failed. Falling back to offline patient mock profile:', err);
+            fetchedPersona = PATIENT_PERSONA_MOCK;
+            const finalName = fetchedPersona?.identity?.first_name
+              ? `${fetchedPersona.identity.first_name} ${fetchedPersona.identity.last_name || ''}`.trim()
+              : 'Neha Aggarwal';
+            setVerifiedPatientName(finalName);
+
+            setTimeout(() => {
+              setStep('success');
+              setTimeout(() => {
+                onVerified({
+                  name: finalName,
+                  phone: phone || fetchedPersona?.identity?.phone || '+91 87778 46383',
+                  persona: fetchedPersona
+                });
+              }, 1600);
+            }, 1800);
+          } else {
+            setOtpError("We couldn't find a health profile linked to this mobile number.");
+            setStep('otp');
+            setOtp(Array(OTP_LENGTH).fill(''));
+            setTimeout(() => otpRefs.current[0]?.focus(), 50);
+          }
+        }
+      });
   };
 
   const handleResend = () => {
     if (!canResend) return;
     setOtp(Array(OTP_LENGTH).fill(''));
     setOtpError('');
+
+    fetch(`${BACKEND_URL}/auth/send-otp?t=${Date.now()}`, {
+      method: 'POST',
+      headers: {
+        'accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache'
+      },
+      body: JSON.stringify({
+        country_code: '+91',
+        phone_number: phone.trim()
+      })
+    })
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to send OTP');
+        const cleanPhone = phone.replace(/\D/g, '');
+        if (!cleanPhone.endsWith('8777846383')) {
+          throw new Error("We couldn't find a health profile linked to this mobile number.");
+        }
+        return res.json();
+      })
+      .catch(err => {
+        console.warn('Failed to resend OTP to backend:', err);
+      });
+
     setStep('otp'); // re-triggers the countdown effect
   };
 
@@ -278,8 +471,10 @@ export default function VerificationPanel({ onVerified, onClose }: VerificationP
 
                 <button
                   onClick={handleSendOtp}
-                  className="mt-2 h-14 w-full rounded-[18px] bg-black dark:bg-white text-white dark:text-black text-sm font-semibold transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-[0.98] cursor-pointer flex items-center justify-center shadow-lg shadow-black/10 dark:shadow-none"
+                  disabled={isSendingOtp}
+                  className="mt-2 h-14 w-full rounded-[18px] bg-black dark:bg-white text-white dark:text-black text-sm font-semibold transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-[0.98] cursor-pointer flex items-center justify-center shadow-lg shadow-black/10 dark:shadow-none disabled:opacity-50 disabled:cursor-not-allowed"
                 >
+                  {isSendingOtp && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
                   Send verification code
                 </button>
               </motion.div>
@@ -441,7 +636,7 @@ export default function VerificationPanel({ onVerified, onClose }: VerificationP
                   transition={{ delay: 0.3, duration: 0.4 }}
                   className="text-lg md:text-xl font-extrabold text-center text-neutral-900 dark:text-white"
                 >
-                  {getTimeBasedGreeting()}, {userName || 'Vishal'} ✨
+                  {getTimeBasedGreeting()}, {verifiedPatientName || userName || 'Patient'} ✨
                 </motion.h3>
                 <motion.p
                   initial={{ opacity: 0 }}

@@ -6,6 +6,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { GoogleGenAI, Modality } from "@google/genai";
 import { YHEALTH_PERSONA } from './persona';
 import { useWakeLock } from '@/hooks/useWakeLock';
+import { activePersonaManager } from '@/persona/PersonaManager';
+import { PersonaContextBuilder } from '@/persona/PersonaContextBuilder';
 
 // Types of voice states
 export type VoiceState = 'idle' | 'connecting' | 'listening' | 'paused' | 'thinking' | 'speaking' | 'error';
@@ -218,6 +220,25 @@ export default function VoiceAssistantPanel({
         httpOptions: { apiVersion: 'v1alpha' } as any
       });
 
+      const hasPersona = !!activePersonaManager.getRawPersona();
+      let voiceSystemInstruction = YHEALTH_PERSONA;
+
+      if (hasPersona) {
+        const clinicalContextBlock = PersonaContextBuilder.buildContext("voice session initialized", activePersonaManager);
+        voiceSystemInstruction = `${YHEALTH_PERSONA}
+
+### ACTIVE PATIENT CLINICAL HISTORY & RECORD CONTEXT:
+${clinicalContextBlock}
+
+CRITICAL RULES FOR RESPONSES:
+1. You are communicating via real-time speech. Keep your responses extremely short, concise, and natural (1-3 sentences max). Never output long explanations, markdown lists, bullet points, or complex tables because they are hard to understand when spoken!
+2. You MUST speak with a natural, warm Indian English voice tone and pacing (natural rhythm, fillers, and professional Indian medical conversational decorum) as specified in the speech instructions above.
+3. Suggest consulting Samarth Gupta (Endocrinologist) when relevant.
+4. Be supportive and acknowledge their efforts, emphasizing low-glycemic eating and stress reduction.
+5. If they ask about their doctor, mention Dr. Samarth Gupta as their endocrinologist lead.
+6. Address the patient warmly by their name (e.g. Lisha).`;
+      }
+
       const sessionPromise = ai.live.connect({
         model: GEMINI_LIVE_MODEL,
         config: {
@@ -227,7 +248,7 @@ export default function VoiceAssistantPanel({
           },
           systemInstruction: {
             parts: [{
-              text: YHEALTH_PERSONA
+              text: voiceSystemInstruction
             }]
           },
           inputAudioTranscription: {},

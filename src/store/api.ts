@@ -3,6 +3,34 @@
 import { Message, OnboardingProfile, OnboardingStep } from './types';
 import { GEMINI_API_KEY } from './config';
 import { isGreetingOrFiller, hasProfanity, getContextualGreeting } from './utils';
+import { activePersonaManager } from '@/persona/PersonaManager';
+import { PersonaContextBuilder } from '@/persona/PersonaContextBuilder';
+import { CAMPAIGN_CONFIG } from './campaign-config';
+
+// Local in-memory cache to store predefined personas and avoid synchronous network request delays on every chat turn
+const predefinedPersonaCache: Record<string, string> = {};
+
+/**
+ * Fetches the predefined campaign persona from the Next.js API proxy server.
+ */
+export async function fetchPredefinedPersona(utmCampaign: string): Promise<string | null> {
+  if (predefinedPersonaCache[utmCampaign]) {
+    return predefinedPersonaCache[utmCampaign];
+  }
+  try {
+    const res = await fetch(`/api/predefined-persona?name=${encodeURIComponent(utmCampaign)}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.system_prompt) {
+        predefinedPersonaCache[utmCampaign] = data.system_prompt;
+        return data.system_prompt;
+      }
+    }
+  } catch (err) {
+    console.warn(`Failed to retrieve predefined campaign persona for ${utmCampaign}:`, err);
+  }
+  return null;
+}
 
 // ── Gemini Chat Response ───────────────────────────────────────────────────
 
@@ -11,8 +39,51 @@ export async function fetchGeminiResponse(
   history: Message[],
   profile?: OnboardingProfile
 ): Promise<string> {
+  // Check if we have an active patient persona loaded
+  const hasPersona = !!activePersonaManager.getRawPersona();
+  const clinicalContextBlock = hasPersona ? PersonaContextBuilder.buildContext(prompt, activePersonaManager) : "";
+
+  // Resolve active campaign role focusing prompt
+  const utmCampaign = typeof window !== 'undefined' ? sessionStorage.getItem('utm_campaign') || 'metabolic_health' : 'metabolic_health';
+  
+  // Try to load the predefined campaign persona from backend API, fallback to offline prompt if unavailable
+  let campaignFocusPrompt = "";
+  const backendPersonaPrompt = await fetchPredefinedPersona(utmCampaign);
+  
+  if (backendPersonaPrompt) {
+    campaignFocusPrompt = backendPersonaPrompt;
+  } else {
+    if (utmCampaign === 'diabetes_reversal') {
+      campaignFocusPrompt = `CAMPAIGN ROLE & FOCUS (DIABETES REVERSAL):
+Your primary focus is Diabetes Reversal and Management.
+- Focus heavily on blood glucose monitoring, CGM charts, and daily blood sugar trends.
+- Guide the user on low-carb nutrition, glycemic indices, insulin sensitivities, and diabetic-safe food choices.
+- Explain HbA1c control mechanisms and metabolic improvements.
+- Support clinical coordination by suggesting endocrinology consultations where appropriate.`;
+    } else if (utmCampaign === 'bp_control') {
+      campaignFocusPrompt = `CAMPAIGN ROLE & FOCUS (BP CONTROL & HEART HEALTH):
+Your primary focus is Blood Pressure Control and Cardiovascular Health.
+- Focus on blood pressure tracking, sodium control, potassium rich foods, and low-salt diet plans.
+- Highlight lifestyle modifications: sleep hygiene, cardiovascular exercise, and stress management indices.
+- Support clinical coordination by suggesting cardiology consultations where appropriate.`;
+    } else if (utmCampaign === 'weight_loss') {
+      campaignFocusPrompt = `CAMPAIGN ROLE & FOCUS (WEIGHT LOSS & NUTRITION):
+Your primary focus is Sustainable Weight Loss and Muscle Retention.
+- Focus on calorie deficits, metabolic assessments, BMI tracks, and body fat optimizations.
+- Emphasize high protein recipes, macro balance, portion control, and daily activity plans.
+- Motivate the user by setting realistic targets and discussing caloric logs.`;
+    } else {
+      campaignFocusPrompt = `CAMPAIGN ROLE & FOCUS (METABOLIC HEALTH):
+Your primary focus is Metabolic Health and Preventive Wellness.
+- Focus on metabolic scores, lifestyle assessments, daily activity tracking, and recovery parameters.
+- Suggest metabolic recovery plans, nutrition optimizations, and health coach follow-ups.`;
+    }
+  }
+
   const systemInstruction = `You are YHealth AI, a warm and knowledgeable health companion.
 Your tone is calm, supportive, friendly, and clear — like a trusted health-savvy friend, not a hospital system.
+
+${campaignFocusPrompt}
 You must always structure your health guidance beautifully using standard GitHub-style Markdown:
 - Use organized lists, bold text, and headers to make information easy to scan.
 - Use styled Markdown tables to show comparisons, symptoms, or structured data.
@@ -21,11 +92,22 @@ You must always structure your health guidance beautifully using standard GitHub
   [HealthCardsGrid: Blood Pressure=120/80=healthy | Blood Glucose=105 mg/dL=warning | Heart Rate=82 bpm=healthy]
 - Be brief and direct. Keep responses to 2-3 focused sentences max. Never write long paragraphs or unnecessary intros. Get straight to the helpful answer.
 - Keep each response fresh — vary your phrasing and structure naturally across conversations.
-- End every response with exactly 3 helpful follow-up suggestions:
-  [FollowUps: Tension headache remedies | Nutrition for migraines | Hydration targets]
+- End every response with exactly 3 helpful follow-up suggestions in this exact format on its own line:
+  [FollowUps: Suggestion 1 | Suggestion 2 | Suggestion 3]
+  * Make sure these suggestion chips are highly personalized, directly matching the user's current question/topic, and derived from their active clinical history/persona if present (e.g. referencing T1D management, customized diets, medication reviews, or face-scan metrics). Do not use generic placeholders.
+- Pay close attention to the conversation history. Always remember the context, previous questions, and answers from the last 5 turns of conversation to provide seamless, context-aware continuity.
 - Never use any emojis in your response. Keep the text clean.
 
-User profile:
+${
+  hasPersona
+    ? `### ACTIVE PATIENT CLINICAL HISTORY & ROUTED CONTEXT:
+${clinicalContextBlock}
+
+CRITICAL RULES FOR RESPONDING:
+1. You MUST maintain standard Indian professional medical conversational decorum.
+2. The user has history of Gestational Diabetes and potential primary hypothyroidism. Suggest consulting Samarth Gupta (Endocrinologist) when relevant.
+3. Be supportive and acknowledge their efforts, emphasizing low-glycemic eating and stress reduction.`
+    : `User profile:
 ${
   profile
     ? `- Name: ${profile.name || 'there'}
@@ -34,6 +116,7 @@ ${
 - Health Goal: ${profile.health_goal || 'general wellness'}
 - Conditions: ${profile.conditions && profile.conditions.length > 0 ? profile.conditions.join(', ') : 'none mentioned'}`
     : 'No profile yet'
+}`
 }
 
 Remember: Be warm, clear, and genuinely helpful. Always recommend seeing a doctor for diagnosis, but do so naturally — never in a defensive or robotic way. NEVER use any emojis in your output.`;
@@ -86,14 +169,19 @@ export async function fetchGreetingResponse(
   userInput: string,          // the actual text the user typed ("hi", "hello", etc.)
   isFirstTime: boolean,       // true = greetingShown was false
   userName?: string,          // name if already collected
-  history: Message[] = []     // previous messages for context
+  history: Message[] = [],    // previous messages for context
+  hasPersona: boolean = false
 ): Promise<string> {
   const contextLines: string[] = [];
 
   if (isFirstTime) {
     contextLines.push("This is the user's very first interaction. Greet them warmly, briefly introduce YHealth as their health assistant, and ask what they should be called.");
   } else if (userName) {
-    contextLines.push(`The user's name is ${userName}. They have already been welcomed and are returning. Give a brief, friendly reply — do NOT re-introduce the platform.`);
+    if (hasPersona) {
+      contextLines.push(`The user is a registered clinical patient named ${userName} whose health data is synchronized. Greet them warmly and reference that their clinical files are safely loaded. Suggest highly specific action chips matching their clinical history.`);
+    } else {
+      contextLines.push(`The user's name is ${userName}. They have already been welcomed and are returning. Give a brief, friendly reply — do NOT re-introduce the platform.`);
+    }
   } else {
     contextLines.push("The user is currently undergoing profile registration (onboarding) but sent another greeting. Give a brief, friendly, returning greeting. Do NOT ask for their name, age, or any other onboarding details in your response as the system handles that automatically.");
   }
@@ -111,12 +199,17 @@ Strict rules:
 4. If returning with name: greet by name warmly and ask how you can help today.
 5. If returning without name: give a warm, brief returning greeting. Do NOT ask for their name, age, or any profile information in your text.
 6. NEVER re-introduce the platform on a return greeting.
-7. Every response must end with quick action chips in this exact format on its own line:
-   [FollowUps: Check Symptoms | Analyze Report | Diet Guidance | Medicine Help]
+7. Every response must end with exactly 3 quick action chips in this exact format on its own line:
+   [FollowUps: Suggestion 1 | Suggestion 2 | Suggestion 3]
+   - If an active clinical patient profile is loaded (hasPersona is true), these suggestions MUST be directly clinical and highly personalized to their actual conditions and risks:
+     * For Type 1 Diabetes (Lisha Karar), suggest actions like: "Review glucose spikes", "Dairy/Egg free recipes", "Endocrinology help".
+     * Make sure these suggestions feel helpful, professional, and clinical.
+   - If no patient profile is loaded, use standard general action chips: "Check Symptoms", "Analyze Report", "Diet Guidance", "Medicine Help".
 8. Make each return greeting feel slightly different — avoid robotic repetition.
 9. WHENEVER you ask for the user's name (e.g., "what should I call you?", "what is your name?"), you MUST format the question in bold Markdown (e.g., **what should I call you?** or **what is your name?**).
 10. NEVER use any emojis in your response. Keep the text clean.
-11. Do NOT duplicate or ask any personal questions if this is a return greeting without name, as the state machine appends the question automatically.`;
+11. Do NOT duplicate or ask any personal questions if this is a return greeting without name, as the state machine appends the question automatically.
+12. Pay close attention to the conversation history. Always remember the context, previous questions, and answers from the last 5 turns of conversation to maintain smooth, context-aware continuity.`;
 
   // Build history context for Gemini (so it sees the conversation)
   const mappedHistory = history.map((msg) => ({

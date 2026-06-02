@@ -10,9 +10,13 @@ import LeadCaptureCard, { LeadData } from '@/components/LeadCaptureCard';
 import VerificationPanel, { VerifiedUser } from '@/components/VerificationPanel';
 import UploadModal from '@/components/UploadModal';
 import { useChatStore } from '@/store/chatStore';
+import { syncConversationWithBackend } from '@/store/utils';
 import { useRef, useEffect, useState } from 'react';
 import { Stethoscope, FileText, Apple, ArrowRight, UserPlus, HeartPulse, ShieldCheck, Activity, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { CAMPAIGN_CONFIG } from '@/store/campaign-config';
+import { captureAnalyticsEvent } from '@/utils/analytics';
+import { activePersonaManager } from '@/persona/PersonaManager';
 
 /* ─── Stage machine ─────────────────────────────────────── */
 type Stage = 'welcome' | 'chat';
@@ -56,8 +60,15 @@ export default function Home() {
     userName,
     onboardingStep,
     onboardingProfile,
-    restoreExistingUser
+    restoreExistingUser,
+    persona,
+    isProgramActivated,
+    activateProgram
   } = useChatStore();
+
+  const utmCampaign = (typeof window !== 'undefined' ? sessionStorage.getItem('utm_campaign') : null) || 'metabolic_health';
+  const campaignConfig = CAMPAIGN_CONFIG[utmCampaign] || CAMPAIGN_CONFIG.metabolic_health;
+  const heroTagline = campaignConfig.heroTagline;
 
   /* ── Stage ── */
   const [stage, setStage] = useState<Stage>('welcome');
@@ -87,10 +98,72 @@ export default function Home() {
   const activeSessionMessages = activeChatId ? messages[activeChatId] || [] : [];
   const hasMessages = activeSessionMessages.length > 0;
 
+  // Dynamic selectors for verified patients
+  const clinicalDescription = persona?.narrative_summary?.short_summary
+    ? `We have securely synchronized your health data: ${persona.narrative_summary.short_summary}`
+    : "We have securely synchronized your clinical records, lab summaries, and care targets.";
+
+  const totalSessionsCount = persona?.care_team?.consultation_history?.total_count || 3;
+  
+  // Fasting / Latest Glucose
+  const glucoseVal = persona?.glucometer_profile?.last_reading?.value_mgdl;
+  const glucoseSlot = persona?.glucometer_profile?.last_reading?.slot || "Pre Breakfast";
+  const glucoseLabel = glucoseVal ? `${glucoseVal} mg/dL` : "92 mg/dL";
+  const glucoseStatus = glucoseVal ? (glucoseVal > 180 ? "Warning (High)" : glucoseVal < 70 ? "Low" : "Optimal") : "Optimal";
+
+  // Estimated HbA1c
+  const hba1cVal = persona?.face_scan_profile?.latest_scan?.lab_estimates?.hba1c_percent;
+  const hba1cLabel = hba1cVal ? `${hba1cVal}%` : "5.3%";
+  const hba1cStatus = hba1cVal ? (hba1cVal > 6.5 ? "High Risk" : hba1cVal > 5.7 ? "Pre-diabetic" : "Optimal") : "Optimal";
+
+  // Cholesterol
+  const chRisk = persona?.face_scan_profile?.latest_scan?.risk_scores?.high_total_cholesterol_risk;
+  const chLabel = chRisk ? `${chRisk.charAt(0).toUpperCase() + chRisk.slice(1)} Risk` : "Warning (High)";
+
+  // Hemoglobin
+  const hbVal = persona?.face_scan_profile?.latest_scan?.lab_estimates?.hemoglobin_gdl;
+  const hbLabel = hbVal ? `${hbVal} g/dL` : "14.2 g/dL";
+
+  // Weight Loss Calories Deficit
+  const weightLossKcal = persona?.identity?.anthropometry?.weight_loss_calories_kcal || 1500;
+
   /* ── Mount: restore state from localStorage ── */
   useEffect(() => {
     setIsMounted(true);
     if (typeof window === 'undefined') return;
+
+    // Parse and persist UTM parameters dynamically
+    const params = new URLSearchParams(window.location.search);
+    const utmSource = params.get('utm_source');
+    const utmMedium = params.get('utm_medium');
+    const utmCampaign = params.get('utm_campaign');
+
+    if (utmCampaign) {
+      sessionStorage.setItem('utm_campaign', utmCampaign);
+      if (utmSource) sessionStorage.setItem('utm_source', utmSource);
+      if (utmMedium) sessionStorage.setItem('utm_medium', utmMedium);
+    }
+
+    const resolvedCampaign = sessionStorage.getItem('utm_campaign') || 'metabolic_health';
+    const config = CAMPAIGN_CONFIG[resolvedCampaign] || CAMPAIGN_CONFIG.metabolic_health;
+
+    // Synchronize campaign states inside our chatStore
+    useChatStore.setState({
+      utm_campaign: resolvedCampaign,
+      utm_source: sessionStorage.getItem('utm_source') || utmSource,
+      utm_medium: sessionStorage.getItem('utm_medium') || utmMedium,
+    });
+
+    // Capture analytical landing view event
+    captureAnalyticsEvent('landing_view', {
+      utm_source: sessionStorage.getItem('utm_source') || utmSource,
+      utm_medium: sessionStorage.getItem('utm_medium') || utmMedium,
+      utm_campaign: resolvedCampaign,
+      program: config.programId,
+      persona: config.persona,
+    });
+
+
 
     // Load persisted chat history
     const { loadPersistedChats } = useChatStore.getState();
@@ -101,7 +174,7 @@ export default function Home() {
     if (existing) {
       try {
         const p = JSON.parse(existing) as VerifiedUser;
-        restoreExistingUser(p.name, p.phone);
+        restoreExistingUser(p.name, p.phone, p.persona, p.session_id);
         setStage('chat');
         setIsTypingDone(true);
         return;
@@ -153,6 +226,7 @@ export default function Home() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeSessionMessages.length, isTyping, streamingMessageId]);
 
+
   // Delay banner appearance by 2 seconds — notification-style
   useEffect(() => {
     if (!showExistingPatientCard) return;
@@ -169,7 +243,7 @@ export default function Home() {
 
   const handleVerified = (user: VerifiedUser) => {
     localStorage.setItem('yhealth_existing_v1', JSON.stringify(user));
-    restoreExistingUser(user.name, user.phone);
+    restoreExistingUser(user.name, user.phone, user.persona, user.session_id);
     setShowVerification(false);
   };
 
@@ -261,18 +335,33 @@ export default function Home() {
                       <h2 className="text-2xl font-extrabold text-[#111111] dark:text-white mt-2.5">
                         Welcome back, {userName}
                       </h2>
-                      <p className="text-xs text-[#666666] dark:text-[#8a8a8a] mt-1">
-                        We have securely synchronized your full medical files, 3 past chats, Vitamin D progress report, and high-protein targets.
+                      <p className="text-xs text-[#666666] dark:text-[#8a8a8a] mt-1 leading-relaxed">
+                        {clinicalDescription}
                       </p>
+                      {/* Dynamic Primary Campaign CTA Button */}
+                      <div className="mt-4 flex flex-col gap-2">
+                        {isProgramActivated ? (
+                          <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 w-fit animate-[pulse_2s_infinite]">
+                            <ShieldCheck className="w-4 h-4" /> {campaignConfig.ctaText.replace('Book', 'Activated').replace('Talk to', 'Connected with').replace('Schedule', 'Scheduled')} Successfully! 🎉
+                          </span>
+                        ) : (
+                          <button
+                            onClick={activateProgram}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-extrabold text-white bg-indigo-600 hover:bg-indigo-700 active:scale-95 shadow-md shadow-indigo-500/25 hover:shadow-lg hover:scale-102 transition-all cursor-pointer w-fit"
+                          >
+                            <Activity className="w-4 h-4" /> {campaignConfig.ctaText}
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <div className="flex gap-2.5 flex-shrink-0">
                       <div className="px-3.5 py-2.5 rounded-2xl bg-black/[0.03] dark:bg-white/[0.04] text-center border border-black/5 dark:border-white/5">
                         <span className="block text-[9px] text-[#888] font-bold uppercase tracking-wider">Restored Chats</span>
-                        <span className="text-sm font-extrabold text-black dark:text-white mt-0.5 block">3 Sessions</span>
+                        <span className="text-sm font-extrabold text-black dark:text-white mt-0.5 block">{totalSessionsCount} Sessions</span>
                       </div>
                       <div className="px-3.5 py-2.5 rounded-2xl bg-black/[0.03] dark:bg-white/[0.04] text-center border border-black/5 dark:border-white/5">
-                        <span className="block text-[9px] text-[#888] font-bold uppercase tracking-wider">Vitamin D3</span>
-                        <span className="text-sm font-extrabold text-black dark:text-white mt-0.5 block">Deficient</span>
+                        <span className="block text-[9px] text-[#888] font-bold uppercase tracking-wider">Lab Reports</span>
+                        <span className="text-sm font-extrabold text-black dark:text-white mt-0.5 block">{persona?.lab_results_profile?.total_uploaded || 2} Uploads</span>
                       </div>
                     </div>
                   </div>
@@ -286,34 +375,44 @@ export default function Home() {
                       <div className="grid grid-cols-2 gap-3.5">
                         {/* Fasting Glucose */}
                         <div className="p-4 rounded-[20px] bg-white/70 dark:bg-white/[0.03] border border-black/5 dark:border-white/5 shadow-sm">
-                          <span className="text-[10px] font-bold text-[#888] uppercase block">Fasting Glucose</span>
-                          <span className="text-lg font-black text-black dark:text-white mt-1 block">92 mg/dL</span>
-                          <span className="inline-block mt-2 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-black/5 dark:bg-white/10 text-black dark:text-white border border-black/5 dark:border-white/10">
-                            Optimal
+                          <span className="text-[10px] font-bold text-[#888] uppercase block">
+                            {glucoseVal ? `Glucose (${glucoseSlot})` : "Glucose Average"}
+                          </span>
+                          <span className="text-lg font-black text-black dark:text-white mt-1 block">{glucoseLabel}</span>
+                          <span className={`inline-block mt-2 px-2 py-0.5 rounded-full text-[9px] font-extrabold border ${
+                            glucoseStatus.includes("Warning")
+                              ? "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20"
+                              : "bg-black/5 dark:bg-white/10 text-black dark:text-white border-black/5 dark:border-white/10"
+                          }`}>
+                            {glucoseStatus}
                           </span>
                         </div>
-                        {/* Vitamin D */}
+                        {/* HbA1c */}
                         <div className="p-4 rounded-[20px] bg-white/70 dark:bg-white/[0.03] border border-black/5 dark:border-white/5 shadow-sm">
-                          <span className="text-[10px] font-bold text-[#888] uppercase block">Vitamin D (25-OH)</span>
-                          <span className="text-lg font-black text-black dark:text-white mt-1 block">22 ng/mL</span>
-                          <span className="inline-block mt-2 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-black/5 dark:bg-white/10 text-black dark:text-white border border-black/5 dark:border-white/10">
-                            Deficient
+                          <span className="text-[10px] font-bold text-[#888] uppercase block">HbA1c (Estimated)</span>
+                          <span className="text-lg font-black text-black dark:text-white mt-1 block">{hba1cLabel}</span>
+                          <span className={`inline-block mt-2 px-2 py-0.5 rounded-full text-[9px] font-extrabold border ${
+                            hba1cStatus.includes("High") || hba1cStatus.includes("Pre-diabetic")
+                              ? "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20"
+                              : "bg-black/5 dark:bg-white/10 text-black dark:text-white border-black/5 dark:border-white/10"
+                          }`}>
+                            {hba1cStatus}
                           </span>
                         </div>
                         {/* Cholesterol */}
                         <div className="p-4 rounded-[20px] bg-white/70 dark:bg-white/[0.03] border border-black/5 dark:border-white/5 shadow-sm">
-                          <span className="text-[10px] font-bold text-[#888] uppercase block">Total Cholesterol</span>
-                          <span className="text-lg font-black text-black dark:text-white mt-1 block">215 mg/dL</span>
+                          <span className="text-[10px] font-bold text-[#888] uppercase block">Cholesterol Risk</span>
+                          <span className="text-lg font-black text-black dark:text-white mt-1 block">{chLabel}</span>
                           <span className="inline-block mt-2 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-black/5 dark:bg-white/10 text-black dark:text-white border border-black/5 dark:border-white/10">
-                            Warning (High)
+                            Face Scan Est.
                           </span>
                         </div>
                         {/* Hemoglobin */}
                         <div className="p-4 rounded-[20px] bg-white/70 dark:bg-white/[0.03] border border-black/5 dark:border-white/5 shadow-sm">
                           <span className="text-[10px] font-bold text-[#888] uppercase block">Hemoglobin</span>
-                          <span className="text-lg font-black text-black dark:text-white mt-1 block">14.2 g/dL</span>
+                          <span className="text-lg font-black text-black dark:text-white mt-1 block">{hbLabel}</span>
                           <span className="inline-block mt-2 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-black/5 dark:bg-white/10 text-black dark:text-white border border-black/5 dark:border-white/10">
-                            Healthy
+                            Optimal
                           </span>
                         </div>
                       </div>
@@ -328,7 +427,7 @@ export default function Home() {
                         <div>
                           <div className="flex justify-between items-center text-xs font-bold mb-1.5">
                             <span className="text-[#666] dark:text-[#aaa]">Weight-Loss Deficit Budget</span>
-                            <span className="text-black dark:text-white">1,500 kcal</span>
+                            <span className="text-black dark:text-white">{weightLossKcal.toLocaleString()} kcal</span>
                           </div>
                           <div className="w-full h-2 rounded-full bg-black/10 dark:bg-white/15 overflow-hidden">
                             <div className="w-[78%] h-full bg-black dark:bg-white" />
@@ -382,7 +481,7 @@ export default function Home() {
                         {userName ? `Welcome back, ${userName}` : 'YHealth AI'}
                       </h1>
                       <p className="text-[9px] md:text-[10px] text-[#888] dark:text-[#909090] font-semibold mt-0.5 tracking-widest uppercase">
-                        Your Intelligent AI Clinical Assistant
+                        {heroTagline}
                       </p>
                     </div>
                   </motion.div>
@@ -404,14 +503,34 @@ export default function Home() {
           ) : (
             /* ─── CHAT CONVERSATION VIEW ─── */
             <div className="flex-1 w-full flex flex-col pb-32 md:pb-10">
+              {isVerified && (
+                <div className="sticky top-0 z-30 w-full px-4 py-2 border-b border-black/[0.05] dark:border-white/[0.05] bg-[#fdfdfd]/80 dark:bg-[#121214]/80 backdrop-blur-md flex items-center justify-between gap-3 shadow-sm mb-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse flex-shrink-0" />
+                    <span className="text-[10px] md:text-xs font-extrabold text-[#111111] dark:text-white tracking-tight truncate">
+                      Active Campaign: <span className="uppercase text-indigo-600 dark:text-indigo-400">{utmCampaign.replace('_', ' ')}</span>
+                    </span>
+                  </div>
+                  <div className="flex-shrink-0">
+                    {isProgramActivated ? (
+                      <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20">
+                        <ShieldCheck className="w-3.5 h-3.5" /> Activated
+                      </span>
+                    ) : (
+                      <button
+                        onClick={activateProgram}
+                        className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-full text-[10px] font-extrabold text-white bg-indigo-600 hover:bg-indigo-700 active:scale-95 transition-all cursor-pointer shadow-sm shadow-indigo-500/20"
+                      >
+                        <Activity className="w-3.5 h-3.5" /> {campaignConfig.ctaText}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
               {activeSessionMessages.map((msg) => (
                 <ChatMessage key={msg.id} id={msg.id} sender={msg.sender} content={msg.content} timestamp={msg.timestamp} isStreaming={msg.id === streamingMessageId} />
               ))}
-              {isTyping && (
-                <div className="px-4 md:px-8 max-w-3xl mx-auto w-full mt-4 animate-fade-in">
-                  <TypingLoader />
-                </div>
-              )}
+              {isTyping && <TypingLoader />}
               <div ref={messagesEndRef} className="h-10 flex-shrink-0" />
             </div>
           )}
