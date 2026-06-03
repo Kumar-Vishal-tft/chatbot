@@ -96,7 +96,7 @@ const Blockquote = ({ children }: any) => {
 export default function ChatMessage({ sender, content, timestamp, isStreaming }: MessageProps) {
   const isUser = sender === 'user';
   const [copied, setCopied] = useState(false);
-  const { sendMessage } = useChatStore();
+  const { sendMessage, onboardingStep } = useChatStore();
 
   // Extract custom markup tags before rendering markdown
   const healthCardsRegex = /\[HealthCardsGrid:\s*([^\]]+)\]/;
@@ -269,7 +269,7 @@ export default function ChatMessage({ sender, content, timestamp, isStreaming }:
                 )}
 
                 {/* Follow-up question pills */}
-                {followUps.length > 0 && (
+                {followUps.length > 0 && (onboardingStep === 'completed' || onboardingStep === 'not_started') && (
                   <div className="flex flex-wrap gap-2 mt-4 pt-3 border-t border-black/5 dark:border-white/5">
                     {followUps.map((q, idx) => (
                       <button

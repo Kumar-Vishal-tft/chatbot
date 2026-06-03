@@ -44,7 +44,7 @@ export async function fetchGeminiResponse(
   const clinicalContextBlock = hasPersona ? PersonaContextBuilder.buildContext(prompt, activePersonaManager) : "";
 
   // Resolve active campaign role focusing prompt
-  const utmCampaign = typeof window !== 'undefined' ? sessionStorage.getItem('utm_campaign') || 'metabolic_health' : 'metabolic_health';
+  const utmCampaign = typeof window !== 'undefined' ? sessionStorage.getItem('utm_campaign') || 'default' : 'default';
   
   // Try to load the predefined campaign persona from backend API, fallback to offline prompt if unavailable
   let campaignFocusPrompt = "";

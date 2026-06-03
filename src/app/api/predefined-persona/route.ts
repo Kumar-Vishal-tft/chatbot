@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const name = searchParams.get('name') || 'metabolic_health';
+  const name = searchParams.get('name') || 'default';
 
   const baseUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
   const backendUrl = `${baseUrl.replace(/\/$/, '')}/predefined-persona?name=${encodeURIComponent(name)}`;

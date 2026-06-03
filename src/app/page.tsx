@@ -63,7 +63,8 @@ export default function Home() {
     restoreExistingUser,
     persona,
     isProgramActivated,
-    activateProgram
+    activateProgram,
+    isRestoring
   } = useChatStore();
 
   const utmCampaign = (typeof window !== 'undefined' ? sessionStorage.getItem('utm_campaign') : null) || 'metabolic_health';
@@ -249,6 +250,25 @@ export default function Home() {
 
   /* ── Skeleton ── */
   if (!isMounted) return <div className="min-h-[100dvh] w-screen gradient-bg" />;
+
+  if (isRestoring) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center min-h-[100dvh] w-screen bg-[#fafafa] dark:bg-[#050505] relative select-none">
+        <div className="relative flex items-center justify-center">
+          {/* Pulsing ring */}
+          <div className="absolute w-20 h-20 rounded-full border border-indigo-500/30 dark:border-indigo-400/30 animate-ping" />
+          <div className="absolute w-16 h-16 rounded-full border-2 border-indigo-500/10 dark:border-indigo-400/10 border-t-indigo-600 dark:border-t-indigo-400 animate-spin" />
+          {/* Logo center */}
+          <div className="relative w-10 h-10 rounded-[12px] bg-white dark:bg-black border border-black/5 dark:border-white/10 flex items-center justify-center p-1.5 shadow-md animate-pulse">
+            <img src="/Y-Health.png" alt="YHealth" className="w-full h-full object-contain brightness-0 dark:brightness-100" />
+          </div>
+        </div>
+        <p className="text-[11px] font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-widest mt-8 animate-pulse">
+          Restoring Clinical File...
+        </p>
+      </div>
+    );
+  }
 
   /* ═══════════════════════════════════════════
      STAGE 1 — WELCOME (typing + Get Started)
@@ -483,6 +503,11 @@ export default function Home() {
                       <p className="text-[9px] md:text-[10px] text-[#888] dark:text-[#909090] font-semibold mt-0.5 tracking-widest uppercase">
                         {heroTagline}
                       </p>
+                      {!userName && (
+                        <p className="text-sm md:text-[15px] text-[#666666] dark:text-[#a0a0a0] mt-3 max-w-[480px] mx-auto leading-relaxed font-medium animate-fade-in">
+                          Your warm AI companion for metabolic and preventive wellness.
+                        </p>
+                      )}
                     </div>
                   </motion.div>
 
@@ -503,30 +528,6 @@ export default function Home() {
           ) : (
             /* ─── CHAT CONVERSATION VIEW ─── */
             <div className="flex-1 w-full flex flex-col pb-32 md:pb-10">
-              {isVerified && (
-                <div className="sticky top-0 z-30 w-full px-4 py-2 border-b border-black/[0.05] dark:border-white/[0.05] bg-[#fdfdfd]/80 dark:bg-[#121214]/80 backdrop-blur-md flex items-center justify-between gap-3 shadow-sm mb-3">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse flex-shrink-0" />
-                    <span className="text-[10px] md:text-xs font-extrabold text-[#111111] dark:text-white tracking-tight truncate">
-                      Active Campaign: <span className="uppercase text-indigo-600 dark:text-indigo-400">{utmCampaign.replace('_', ' ')}</span>
-                    </span>
-                  </div>
-                  <div className="flex-shrink-0">
-                    {isProgramActivated ? (
-                      <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20">
-                        <ShieldCheck className="w-3.5 h-3.5" /> Activated
-                      </span>
-                    ) : (
-                      <button
-                        onClick={activateProgram}
-                        className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-full text-[10px] font-extrabold text-white bg-indigo-600 hover:bg-indigo-700 active:scale-95 transition-all cursor-pointer shadow-sm shadow-indigo-500/20"
-                      >
-                        <Activity className="w-3.5 h-3.5" /> {campaignConfig.ctaText}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
               {activeSessionMessages.map((msg) => (
                 <ChatMessage key={msg.id} id={msg.id} sender={msg.sender} content={msg.content} timestamp={msg.timestamp} isStreaming={msg.id === streamingMessageId} />
               ))}

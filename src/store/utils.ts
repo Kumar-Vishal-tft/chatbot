@@ -55,6 +55,34 @@ export const syncSessionWithRedis = async (
   }
 };
 
+let debouncedSyncTimeout: NodeJS.Timeout | null = null;
+
+export const triggerDebouncedSync = (
+  sessions: ChatSession[],
+  messages: Record<string, Message[]>,
+  activeId: string | null
+) => {
+  if (typeof window === 'undefined') return;
+
+  if (debouncedSyncTimeout) {
+    clearTimeout(debouncedSyncTimeout);
+  }
+
+  debouncedSyncTimeout = setTimeout(async () => {
+    console.log('Event-driven debounced sync executing...');
+    try {
+      await syncSessionWithRedis(sessions, messages, activeId);
+    } catch (e) {
+      console.warn('Failed to sync session to Redis in debounced callback:', e);
+    }
+    try {
+      await syncConversationWithBackend(messages, activeId);
+    } catch (e) {
+      console.warn('Failed to sync conversation to backend in debounced callback:', e);
+    }
+  }, 5000);
+};
+
 
 // ── Input Guards ───────────────────────────────────────────────────────────
 
@@ -199,6 +227,11 @@ export const syncConversationWithBackend = async (
   const { useChatStore } = await import('./chatStore');
   const storeState = useChatStore.getState();
 
+  // For new/guest users, we bypass the standard chat sync endpoint (Option B: we only send history once on onboarding completion)
+  if (!storeState.isExistingPatient) {
+    return;
+  }
+
   // Resolve session UUID (prioritizing the verified backend UUID, fallback to activeChatId)
   const rawId = storeState.sessionId || activeId || storeState.activeChatId || localStorage.getItem('yhealth_active_chat_id') || 'guest-session';
   const sessionUUID = toValidUUID(rawId);
@@ -230,6 +263,7 @@ export const syncConversationWithBackend = async (
     }
   }
 
+  // Existing Patient: Use the standard chat sync endpoint
   const payload = {
     session_id: sessionUUID,
     time: Math.floor(Date.now() / 1000), // Epoch format in seconds

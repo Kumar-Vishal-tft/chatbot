@@ -9,7 +9,7 @@
 
 import { create } from 'zustand';
 import { ChatState, ChatSession, Message, LastBotMessageType } from './types';
-import { saveChatState, syncSessionWithRedis, syncConversationWithBackend, isLikelyGibberish, isGreetingOrFiller, generateUUID } from './utils';
+import { saveChatState, syncSessionWithRedis, syncConversationWithBackend, triggerDebouncedSync, isLikelyGibberish, isGreetingOrFiller, generateUUID } from './utils';
 
 import { fetchGeminiResponse, fetchGreetingResponse, verifyUserData } from './api';
 import { RESTORED_SESSIONS, RESTORED_MESSAGES } from './constants';
@@ -37,6 +37,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   onboardingStep: 'not_started',
   isExistingPatient: false,
   isVerified: false,
+  isRestoring: false,
   userName: '',
   sessionId: null,
   utm_campaign: null,
@@ -148,6 +149,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // ── Send Message ──────────────────────────────────────────────────────────
   sendMessage: (content) => {
+    if (get().isTyping) return;
     const {
       activeChatId,
       onboardingStep,
@@ -187,7 +189,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => {
       const nextMessages = { ...state.messages, [chatId!]: [...(state.messages[chatId!] || []), userMessage] };
       saveChatState(state.chatSessions, nextMessages, chatId);
-      syncSessionWithRedis(state.chatSessions, nextMessages, chatId);
+      triggerDebouncedSync(state.chatSessions, nextMessages, chatId);
       return { messages: nextMessages, isTyping: true };
     });
 
@@ -239,14 +241,16 @@ Could you rephrase that? Try something like:
             activeQuestion = `**What should I call you?**`;
           } else if (onboardingStep === 'asked_age') {
             activeQuestion = `**How old are you?** *(This helps me give you better guidance)*`;
-          } else if (onboardingStep === 'asked_phone') {
-            activeQuestion = `**What is your mobile/phone number?** *(This helps me save your secure progress)*`;
           } else if (onboardingStep === 'asked_gender') {
             activeQuestion = `**What's your gender?**\n\n[FollowUps: Male | Female | Prefer not to say]`;
+          } else if (onboardingStep === 'asked_phone') {
+            activeQuestion = `**What is your mobile/phone number?** *(This helps me save your secure progress)*`;
           } else if (onboardingStep === 'asked_goal') {
-            activeQuestion = `**What would you most like help with?**\n\n[FollowUps: Weight loss | Diabetes | Blood reports | Nutrition | Fitness | General wellness]`;
+            activeQuestion = `**What would you most like help with?**\n\n[FollowUps: Weight loss | Diabetes | Blood reports | Nutrition | Fitness | General wellness | Hypertension | GLP-1 | Metabolic | Sexual Wellness | Mental Wellness | Longevity]`;
           } else if (onboardingStep === 'asked_conditions') {
-            activeQuestion = `**Do you have any existing medical conditions?** *(Type them out, or choose below)*\n\n[FollowUps: None | Diabetes | Hypertension | Asthma]`;
+            activeQuestion = `**Do you have any existing medical conditions?** *(Type them out, or choose below)*\n\n[FollowUps: None | Diabetes | Hypertension | Asthma | Obesity | Metabolic health]`;
+          } else if (onboardingStep === 'asked_feeling') {
+            activeQuestion = `**Additional Note on how you are feeling?** *(Type a short note or feel free to say 'N/A' or 'None')*`;
           }
 
           // Strip any duplicate follow-ups if we are appending our own onboarding follow-up buttons
@@ -269,7 +273,7 @@ Could you rephrase that? Try something like:
         }
       }
 
-      // ── 3. Onboarding in progress (name → age → phone → gender → goal → conditions → complete) ──
+      // ── 3. Onboarding in progress (name → age → gender → phone → goal → conditions → feeling → complete) ──
       else if (!isVerified && onboardingStep !== 'completed' && onboardingStep !== 'not_started') {
 
         if (onboardingStep === 'asked_name') {
@@ -310,7 +314,31 @@ Could you rephrase that? Try something like:
             nextStep = 'asked_age';
           } else {
             nextProfile.age = verification.parsedValue;
-            matchedResponse = `Got it — **${verification.parsedValue}** years old.\n\n**What is your mobile/phone number?** *(This helps me save your secure progress)*`;
+            matchedResponse = `Got it — **${verification.parsedValue}** years old.\n\n**What's your gender?**\n\n[FollowUps: Male | Female | Prefer not to say]`;
+            nextStep = 'asked_gender';
+            nextBotMessageType = 'onboarding_question';
+          }
+        }
+
+        else if (onboardingStep === 'asked_gender') {
+          const normalized = content.trim().toLowerCase();
+          let parsedGender = '';
+
+          if (normalized === 'male' || normalized === 'm') {
+            parsedGender = 'Male';
+          } else if (normalized === 'female' || normalized === 'f') {
+            parsedGender = 'Female';
+          } else if (normalized === 'prefer not to say' || normalized === 'skip' || normalized.includes('not to say') || normalized.includes('prefer')) {
+            parsedGender = 'Prefer not to say';
+          }
+
+          if (!parsedGender) {
+            matchedResponse = `Please select or enter a valid gender choice:\n*   **Male**\n*   **Female**\n*   **Prefer not to say**\n\n**What's your gender?**\n\n[FollowUps: Male | Female | Prefer not to say]`;
+            nextBotMessageType = 'onboarding_question';
+            nextStep = 'asked_gender';
+          } else {
+            nextProfile.gender = parsedGender;
+            matchedResponse = `Thanks! **What is your mobile/phone number?** *(This helps me save your secure progress)*`;
             nextStep = 'asked_phone';
             nextBotMessageType = 'onboarding_question';
           }
@@ -326,22 +354,15 @@ Could you rephrase that? Try something like:
             nextStep = 'asked_phone';
           } else {
             nextProfile.phone_number = content.trim();
-            matchedResponse = `Perfect, got your contact number! 🙌\n\n**What's your gender?**\n\n[FollowUps: Male | Female | Prefer not to say]`;
-            nextStep = 'asked_gender';
+            matchedResponse = `Perfect, got your contact number! 🙌\n\n**What would you most like help with?**\n\n[FollowUps: Weight loss | Diabetes | Blood reports | Nutrition | Fitness | General wellness | Hypertension | GLP-1 | Metabolic | Sexual Wellness | Mental Wellness | Longevity]`;
+            nextStep = 'asked_goal';
             nextBotMessageType = 'onboarding_question';
           }
         }
 
-        else if (onboardingStep === 'asked_gender') {
-          nextProfile.gender = content;
-          matchedResponse = `Thanks! **What would you most like help with?**\n\n[FollowUps: Weight loss | Diabetes | Blood reports | Nutrition | Fitness | General wellness]`;
-          nextStep = 'asked_goal';
-          nextBotMessageType = 'onboarding_question';
-        }
-
         else if (onboardingStep === 'asked_goal') {
           nextProfile.health_goal = content;
-          matchedResponse = `Noted — **${content}** it is!\n\n**Do you have any existing medical conditions?** *(Type them out, or choose below)*\n\n[FollowUps: None | Diabetes | Hypertension | Asthma]`;
+          matchedResponse = `Noted — **${content}** it is!\n\n**Do you have any existing medical conditions?** *(Type them out, or choose below)*\n\n[FollowUps: None | Diabetes | Hypertension | Asthma | Obesity | Metabolic health]`;
           nextStep = 'asked_conditions';
           nextBotMessageType = 'onboarding_question';
         }
@@ -350,13 +371,20 @@ Could you rephrase that? Try something like:
           nextProfile.conditions = content.toLowerCase().includes('none')
             ? []
             : content.split(',').map((c) => c.trim());
+          matchedResponse = `Got it.\n\n**Additional Note on how you are feeling?** *(Type a short note or feel free to say 'N/A' or 'None')*`;
+          nextStep = 'asked_feeling';
+          nextBotMessageType = 'onboarding_question';
+        }
+
+        else if (onboardingStep === 'asked_feeling') {
+          nextProfile.feeling_note = content;
 
           const conditionsSummary =
             nextProfile.conditions && nextProfile.conditions.length > 0
               ? nextProfile.conditions.join(', ')
               : 'None mentioned';
 
-          matchedResponse = `You're all set, **${nextProfile.name || 'there'}**! 🎉\n\nHere's a quick look at your profile:\n*   **Age / Gender:** ${nextProfile.age || '—'} / ${nextProfile.gender || '—'}\n*   **Phone:** ${nextProfile.phone_number || '—'}\n*   **Health Goal:** ${nextProfile.health_goal || 'General wellness'}\n*   **Conditions:** ${conditionsSummary}\n\n[HealthCardsGrid: Metabolic Rate=Active=healthy | Profile=Complete=healthy]\n\nWhat would you like to explore today?\n\n[FollowUps: Check Symptoms | Analyze Report | Diet Guidance | Medicine Help]`;
+          matchedResponse = `You're all set, **${nextProfile.name || 'there'}**! 🎉\n\nHere's a quick look at your profile:\n*   **Age / Gender:** ${nextProfile.age || '—'} / ${nextProfile.gender || '—'}\n*   **Phone:** ${nextProfile.phone_number || '—'}\n*   **Health Goal:** ${nextProfile.health_goal || 'General wellness'}\n*   **Conditions:** ${conditionsSummary}\n*   **Additional Note:** ${nextProfile.feeling_note || 'None'}\n\nWhat would you like to explore today?\n\n[FollowUps: Check Symptoms | Analyze Report | Diet Guidance | Medicine Help]`;
           
           nextStep = 'completed';
           nextBotMessageType = 'onboarding_complete';
@@ -387,13 +415,63 @@ Could you rephrase that? Try something like:
               additional_details: {
                 health_goal: nextProfile.health_goal || 'General wellness',
                 conditions: nextProfile.conditions || [],
+                feeling_note: nextProfile.feeling_note || '',
                 utm_campaign: get().utm_campaign || sessionStorage.getItem('utm_campaign') || 'metabolic_health',
               }
             })
           })
             .then(async (res) => {
               if (res.ok) {
-                console.log('Lead captured and sent to backend successfully:', await res.json());
+                const leadData = await res.json();
+                console.log('Lead captured and sent to backend successfully:', leadData);
+
+                const activeId = get().activeChatId;
+
+                if (sessionUUID && activeId) {
+                  const msgs = get().messages[activeId] || [];
+                  const chatPairs: { user: string; agent: string }[] = [];
+
+                  for (let i = 0; i < msgs.length; i++) {
+                    if (msgs[i].sender === 'user') {
+                      const userContent = msgs[i].content;
+                      let agentContent = '';
+                      for (let j = i + 1; j < msgs.length; j++) {
+                        if (msgs[j].sender === 'assistant') {
+                          agentContent = msgs[j].content;
+                          break;
+                        }
+                      }
+                      chatPairs.push({
+                        user: userContent,
+                        agent: agentContent,
+                      });
+                    }
+                  }
+
+                  // Add the final step we just completed
+                  chatPairs.push({
+                    user: content,
+                    agent: matchedResponse,
+                  });
+
+                  fetch(`/api/leads/${sessionUUID}/session`, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                      history: chatPairs,
+                    }),
+                  })
+                    .then(async (histRes) => {
+                      if (histRes.ok) {
+                        console.log('Lead chat history synced successfully:', await histRes.json());
+                      } else {
+                        console.warn('Failed to sync lead chat history:', histRes.status, await histRes.text());
+                      }
+                    })
+                    .catch((err) => console.warn('Error syncing lead chat history:', err));
+                }
               } else {
                 console.warn('Failed to send lead to backend:', res.status, await res.text());
               }
@@ -448,7 +526,6 @@ Could you rephrase that? Try something like:
       set((state) => {
         const nextMessages = { ...state.messages, [chatId!]: [...(state.messages[chatId!] || []), assistantMessage] };
         saveChatState(state.chatSessions, nextMessages, chatId);
-        syncSessionWithRedis(state.chatSessions, nextMessages, chatId);
         return {
           isTyping: false,
           streamingMessageId: assistantMessageId,
@@ -465,7 +542,7 @@ Could you rephrase that? Try something like:
           clearInterval(interval);
           set({ streamingMessageId: null, activeIntervalId: null });
           saveChatState(get().chatSessions, get().messages, get().activeChatId);
-          syncSessionWithRedis(get().chatSessions, get().messages, get().activeChatId);
+          triggerDebouncedSync(get().chatSessions, get().messages, get().activeChatId);
         } else {
           currentIdx += Math.min(Math.floor(Math.random() * 4) + 6, responseLength - currentIdx);
           const slicedText = matchedResponse.substring(0, currentIdx);
@@ -495,7 +572,7 @@ Could you rephrase that? Try something like:
     }
     set({ activeIntervalId: null, streamingMessageId: null, isTyping: false });
     saveChatState(get().chatSessions, get().messages, get().activeChatId);
-    syncSessionWithRedis(get().chatSessions, get().messages, get().activeChatId);
+    triggerDebouncedSync(get().chatSessions, get().messages, get().activeChatId);
   },
 
   // ── Restore Existing Patient ──────────────────────────────────────────────
@@ -510,6 +587,7 @@ Could you rephrase that? Try something like:
     const resolvedSessionId = sessionId || phone; // use phone number as session identifier fallback if sessionId is null
 
     set({
+      isRestoring: true,
       isVerified: true,
       isExistingPatient: true,
       userType: 'existing',
@@ -533,6 +611,7 @@ Could you rephrase that? Try something like:
             chatSessions: data.sessions,
             messages: data.messages,
             activeChatId: activeId,
+            isRestoring: false,
           });
           // Sync to local storage to maintain synchronization
           saveChatState(data.sessions, data.messages, activeId);
@@ -569,6 +648,7 @@ Could you rephrase that? Try something like:
       chatSessions: [newSession],
       messages: { [newChatId]: [welcomeMsg] },
       activeChatId: newChatId,
+      isRestoring: false,
     });
     saveChatState([newSession], { [newChatId]: [welcomeMsg] }, newChatId);
     syncSessionWithRedis([newSession], { [newChatId]: [welcomeMsg] }, newChatId);
@@ -617,7 +697,7 @@ Could you rephrase that? Try something like:
       set((state) => {
         const nextMessages = { ...state.messages, [chatId]: [welcomeMsg] };
         saveChatState(state.chatSessions, nextMessages, chatId);
-        syncSessionWithRedis(state.chatSessions, nextMessages, chatId);
+        triggerDebouncedSync(state.chatSessions, nextMessages, chatId);
         return { messages: nextMessages, lastBotMessageType: 'greeting' as LastBotMessageType };
       });
     }, 400);
@@ -679,24 +759,7 @@ Could you rephrase that? Try something like:
         await syncSessionWithRedis([newSession], initialMessages, newGuestSessionId);
       }
 
-      // 3. Start continuous, non-blocking background sync loop to FastAPI backend every 15 minutes (900000ms)
-      if (typeof window !== 'undefined' && !(globalThis as any).__sync_loop_started__) {
-        (globalThis as any).__sync_loop_started__ = true;
-        
-        const runSyncLoop = async () => {
-          try {
-            const { messages, activeChatId } = get();
-            await syncConversationWithBackend(messages, activeChatId);
-          } catch (err) {
-            console.error('Error in background sync loop:', err);
-          }
-          // Schedule next run continuously in 15 minutes
-          setTimeout(runSyncLoop, 15 * 60 * 1000);
-        };
-        
-        // Start the continuous recursive loop
-        runSyncLoop();
-      }
+      // 3. Polling dropped in favor of event-driven sync triggered when messages arrive (debounced)
     } catch (e) {
       console.error('Error loading persisted chats:', e);
     }

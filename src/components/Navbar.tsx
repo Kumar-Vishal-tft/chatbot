@@ -57,7 +57,7 @@ export default function Navbar() {
             </span>
           </div>
           <span className="text-[9px] md:text-[10px] font-semibold text-[#666666] dark:text-[#8a8a8a] mt-0.5">
-            Clinical Assistant
+            Your AI Health Assistant
           </span>
         </div>
       </div>
@@ -66,11 +66,6 @@ export default function Navbar() {
       <div className="flex items-center gap-2.5 md:gap-4">
 
 
-        {/* AI ONLINE STATE INDICATOR */}
-        <span className="hidden md:inline-flex items-center gap-1.5 h-9 text-[13px] font-bold text-[#666666] dark:text-[#8a8a8a] px-[14px] rounded-full border border-black/5 dark:border-white/5 bg-black/[0.01] dark:bg-white/[0.01]">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 dark:bg-white animate-pulse" />
-          AI Online
-        </span>
 
         {/* THEME TOGGLER */}
         <ThemeToggle />
@@ -95,15 +90,13 @@ export default function Navbar() {
                 </div>
                 <div className="flex flex-col min-w-0">
                   <span className="text-xs font-bold text-[#111111] dark:text-white truncate">
-                    {userName || 'Guest Patient'}
+                    {userName || 'Guest'}
                   </span>
-                  <span className="text-[9px] text-[#666666] dark:text-[#8a8a8a] font-bold uppercase tracking-wider flex items-center gap-0.5 mt-0.5">
-                    {isVerified ? (
-                      <><Sparkles className="w-2.5 h-2.5 text-[#111111] dark:text-[#c0c0c0]" /> Verified Patient</>
-                    ) : (
-                      <>Onboarding Active</>
-                    )}
-                  </span>
+                  {isVerified && (
+                    <span className="text-[9px] text-[#666666] dark:text-[#8a8a8a] font-bold uppercase tracking-wider flex items-center gap-0.5 mt-0.5">
+                      <Sparkles className="w-2.5 h-2.5 text-[#111111] dark:text-[#c0c0c0]" /> Verified
+                    </span>
+                  )}
                 </div>
               </div>
 

@@ -23,6 +23,7 @@ export interface OnboardingProfile {
   health_goal?: string;
   conditions?: string[];
   mobile_verified?: boolean;
+  feeling_note?: string;
 }
 
 export type OnboardingStep =
@@ -33,6 +34,7 @@ export type OnboardingStep =
   | 'asked_gender'
   | 'asked_goal'
   | 'asked_conditions'
+  | 'asked_feeling'
   | 'completed';
 
 // Tracks what type the last bot message was — used to prevent duplicate greetings/questions
@@ -78,6 +80,7 @@ export interface ChatState {
   utm_source?: string | null;
   utm_medium?: string | null;
   isProgramActivated?: boolean;
+  isRestoring?: boolean;
 
   // Conversation State
   greetingShown: boolean;           // true after first welcome message is displayed
