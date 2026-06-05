@@ -1,7 +1,7 @@
 'use client';
 
 import { useChatStore } from '@/store/chatStore';
-import { SendHorizontal, Mic, Lock, Plus, X, FileText, Pill, Image as ImageIcon, Camera, Activity, Sparkles, Smartphone } from 'lucide-react';
+import { SendHorizontal, Mic, Lock, Plus, X, FileText, Pill, Image as ImageIcon, Camera, Activity, Sparkles, Smartphone, UserCheck } from 'lucide-react';
 import { useRef, useState, useEffect, useCallback } from 'react';
 import VoiceAssistantPanel from './VoiceAssistantPanel';
 
@@ -95,10 +95,11 @@ function useTypewriter(active: boolean) {
 interface ChatInputProps {
   disabled?: boolean;
   onAttachClick?: () => void;
+  onVerify?: () => void;
 }
 
-export default function ChatInput({ disabled: externalDisabled = false, onAttachClick }: ChatInputProps) {
-  const { sendMessage, isTyping, streamingMessageId, stopStreaming, onboardingStep, isExistingPatient } = useChatStore();
+export default function ChatInput({ disabled: externalDisabled = false, onAttachClick, onVerify }: ChatInputProps) {
+  const { sendMessage, isTyping, streamingMessageId, stopStreaming, onboardingStep, isExistingPatient, isVerified } = useChatStore();
   const isAIResponding = isTyping || streamingMessageId !== null;
   const isDisabled = externalDisabled || isAIResponding;
 
@@ -340,8 +341,9 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
       {/* Floating CTA row (only shows when clinical profiling flow is not active AND user is not an existing patient) */}
       {!isExistingPatient && onboardingStep === 'completed' && (
         <div className="w-full max-w-[860px] mx-auto mb-2.5 flex flex-wrap items-center justify-center gap-2 px-2 select-none animate-fade-in">
+          {/* 1. Download YHealth App */}
           <button
-            onClick={() => setCtaModal('about')}
+            onClick={() => setCtaModal('download')}
             className="group flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold
               bg-white/80 dark:bg-black/20 
               border border-black/[0.08] dark:border-white/[0.08]
@@ -352,9 +354,11 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
               shadow-sm hover:shadow-md hover:-translate-y-0.5
               transition-all duration-300 active:scale-95 cursor-pointer"
           >
-            <Sparkles className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400 group-hover:scale-110 transition-transform duration-300" />
-            <span>About YHealth</span>
+            <Smartphone className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400 group-hover:scale-110 transition-transform duration-300" />
+            <span>Download YHealth App</span>
           </button>
+
+          {/* 2. Speak to YHealth Expert */}
           <button
             onClick={() => setCtaModal('expert')}
             className="group flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold
@@ -370,8 +374,29 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
             <Activity className="w-3.5 h-3.5 text-emerald-500 dark:text-emerald-400 group-hover:scale-110 transition-transform duration-300" />
             <span>Speak to YHealth Expert</span>
           </button>
+
+          {/* 3. Existing Patient */}
+          {!isVerified && onVerify && (
+            <button
+              onClick={onVerify}
+              className="group flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold
+                bg-white/80 dark:bg-black/20 
+                border border-black/[0.08] dark:border-white/[0.08]
+                hover:border-black/20 dark:hover:border-white/25
+                text-neutral-600 dark:text-neutral-300 
+                hover:text-black dark:hover:text-white
+                hover:bg-white dark:hover:bg-white/[0.02]
+                shadow-sm hover:shadow-md hover:-translate-y-0.5
+                transition-all duration-300 active:scale-95 cursor-pointer"
+            >
+              <UserCheck className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 group-hover:scale-110 transition-transform duration-300" />
+              <span>Existing Patient?</span>
+            </button>
+          )}
+
+          {/* 4. About YHealth */}
           <button
-            onClick={() => setCtaModal('download')}
+            onClick={() => setCtaModal('about')}
             className="group flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold
               bg-white/80 dark:bg-black/20 
               border border-black/[0.08] dark:border-white/[0.08]
@@ -382,8 +407,8 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
               shadow-sm hover:shadow-md hover:-translate-y-0.5
               transition-all duration-300 active:scale-95 cursor-pointer"
           >
-            <Smartphone className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400 group-hover:scale-110 transition-transform duration-300" />
-            <span>Download YHealth App</span>
+            <Sparkles className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400 group-hover:scale-110 transition-transform duration-300" />
+            <span>About YHealth</span>
           </button>
         </div>
       )}

@@ -601,7 +601,7 @@ export default function Home() {
               </div>
             )}
           </AnimatePresence>
-          <ChatInput onAttachClick={() => setShowUpload(true)} />
+          <ChatInput onAttachClick={() => setShowUpload(true)} onVerify={() => setShowVerification(true)} />
         </div>
       </div>
 
