@@ -124,6 +124,34 @@ export async function fetchPredefinedPersona(utmCampaign: string): Promise<strin
   return null;
 }
 
+export function getOfflineCampaignFocusPrompt(utmCampaign: string): string {
+  if (utmCampaign === 'diabetes_reversal') {
+    return `CAMPAIGN ROLE & FOCUS (DIABETES REVERSAL):
+Your primary focus is Diabetes Reversal and Management.
+- Focus heavily on blood glucose monitoring, CGM charts, and daily blood sugar trends.
+- Guide the user on low-carb nutrition, glycemic indices, insulin sensitivities, and diabetic-safe food choices.
+- Explain HbA1c control mechanisms and metabolic improvements.
+- Support clinical coordination by suggesting endocrinology consultations where appropriate.`;
+  } else if (utmCampaign === 'bp_control') {
+    return `CAMPAIGN ROLE & FOCUS (BP CONTROL & HEART HEALTH):
+Your primary focus is Blood Pressure Control and Cardiovascular Health.
+- Focus on blood pressure tracking, sodium control, potassium rich foods, and low-salt diet plans.
+- Highlight lifestyle modifications: sleep hygiene, cardiovascular exercise, and stress management indices.
+- Support clinical coordination by suggesting cardiology consultations where appropriate.`;
+  } else if (utmCampaign === 'weight_loss') {
+    return `CAMPAIGN ROLE & FOCUS (WEIGHT LOSS & NUTRITION):
+Your primary focus is Sustainable Weight Loss and Muscle Retention.
+- Focus on calorie deficits, metabolic assessments, BMI tracks, and body fat optimizations.
+- Emphasize high protein recipes, macro balance, portion control, and daily activity plans.
+- Motivate the user by setting realistic targets and discussing caloric logs.`;
+  } else {
+    return `CAMPAIGN ROLE & FOCUS (METABOLIC HEALTH):
+Your primary focus is Metabolic Health and Preventive Wellness.
+- Focus on metabolic scores, lifestyle assessments, daily activity tracking, and recovery parameters.
+- Suggest metabolic recovery plans, nutrition optimizations, and health coach follow-ups.`;
+  }
+}
+
 // ── Gemini Chat Response ───────────────────────────────────────────────────
 
 export async function fetchGeminiResponse(
@@ -145,31 +173,7 @@ export async function fetchGeminiResponse(
   if (backendPersonaPrompt) {
     campaignFocusPrompt = backendPersonaPrompt;
   } else {
-    if (utmCampaign === 'diabetes_reversal') {
-      campaignFocusPrompt = `CAMPAIGN ROLE & FOCUS (DIABETES REVERSAL):
-Your primary focus is Diabetes Reversal and Management.
-- Focus heavily on blood glucose monitoring, CGM charts, and daily blood sugar trends.
-- Guide the user on low-carb nutrition, glycemic indices, insulin sensitivities, and diabetic-safe food choices.
-- Explain HbA1c control mechanisms and metabolic improvements.
-- Support clinical coordination by suggesting endocrinology consultations where appropriate.`;
-    } else if (utmCampaign === 'bp_control') {
-      campaignFocusPrompt = `CAMPAIGN ROLE & FOCUS (BP CONTROL & HEART HEALTH):
-Your primary focus is Blood Pressure Control and Cardiovascular Health.
-- Focus on blood pressure tracking, sodium control, potassium rich foods, and low-salt diet plans.
-- Highlight lifestyle modifications: sleep hygiene, cardiovascular exercise, and stress management indices.
-- Support clinical coordination by suggesting cardiology consultations where appropriate.`;
-    } else if (utmCampaign === 'weight_loss') {
-      campaignFocusPrompt = `CAMPAIGN ROLE & FOCUS (WEIGHT LOSS & NUTRITION):
-Your primary focus is Sustainable Weight Loss and Muscle Retention.
-- Focus on calorie deficits, metabolic assessments, BMI tracks, and body fat optimizations.
-- Emphasize high protein recipes, macro balance, portion control, and daily activity plans.
-- Motivate the user by setting realistic targets and discussing caloric logs.`;
-    } else {
-      campaignFocusPrompt = `CAMPAIGN ROLE & FOCUS (METABOLIC HEALTH):
-Your primary focus is Metabolic Health and Preventive Wellness.
-- Focus on metabolic scores, lifestyle assessments, daily activity tracking, and recovery parameters.
-- Suggest metabolic recovery plans, nutrition optimizations, and health coach follow-ups.`;
-    }
+    campaignFocusPrompt = getOfflineCampaignFocusPrompt(utmCampaign);
   }
 
   const systemInstruction = `You are YHealth AI, a warm and knowledgeable health companion.

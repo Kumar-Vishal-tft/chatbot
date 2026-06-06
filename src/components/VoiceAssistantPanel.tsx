@@ -9,6 +9,7 @@ import { useWakeLock } from '@/hooks/useWakeLock';
 import { activePersonaManager } from '@/persona/PersonaManager';
 import { PersonaContextBuilder } from '@/persona/PersonaContextBuilder';
 import { useChatStore } from '@/store/chatStore';
+import { fetchPredefinedPersona, getOfflineCampaignFocusPrompt } from '@/store/api';
 
 // Types of voice states
 export type VoiceState = 'idle' | 'connecting' | 'listening' | 'paused' | 'thinking' | 'speaking' | 'error';
@@ -56,6 +57,10 @@ export default function VoiceAssistantPanel({
   const micStreamRef = useRef<MediaStream | null>(null);
   const sessionRef = useRef<any>(null);
   const scheduledEndRef = useRef(0);
+
+  // Voice transcription accumulation refs for Langfuse tracing
+  const userSpeechAccumulatedRef = useRef<string>("");
+  const aiSpeechAccumulatedRef = useRef<string>("");
 
   // Real-time audio amplitude for waveform syncing (0 to 1 scale)
   const [audioVolume, setAudioVolume] = useState(0);
@@ -142,6 +147,8 @@ export default function VoiceAssistantPanel({
       } catch (_) {}
       sessionRef.current = null;
     }
+    userSpeechAccumulatedRef.current = "";
+    aiSpeechAccumulatedRef.current = "";
     setState('idle');
     setAudioVolume(0);
   }, [clearAudio]);
@@ -204,6 +211,8 @@ export default function VoiceAssistantPanel({
   const startConnection = useCallback(async () => {
     setState('connecting');
     setConnectionError(null);
+    userSpeechAccumulatedRef.current = "";
+    aiSpeechAccumulatedRef.current = "";
 
     const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
     if (!apiKey) {
@@ -226,6 +235,21 @@ export default function VoiceAssistantPanel({
         historyContext = recentMessages
           .map(m => `[${m.sender === 'user' ? 'User' : 'Assistant'}]: ${m.content}`)
           .join("\n");
+      }
+
+      // Resolve active campaign role focusing prompt
+      const utmCampaign = typeof window !== 'undefined' ? sessionStorage.getItem('utm_campaign') || 'default' : 'default';
+      let campaignFocusPrompt = "";
+      try {
+        const backendPersonaPrompt = await fetchPredefinedPersona(utmCampaign);
+        if (backendPersonaPrompt) {
+          campaignFocusPrompt = backendPersonaPrompt;
+        } else {
+          campaignFocusPrompt = getOfflineCampaignFocusPrompt(utmCampaign);
+        }
+      } catch (e) {
+        console.warn("Failed to fetch predefined campaign persona in voice assistant:", e);
+        campaignFocusPrompt = getOfflineCampaignFocusPrompt(utmCampaign);
       }
 
       // Initialize GenAI Live API
@@ -274,6 +298,8 @@ ${missingList.map(item => `- ${item}`).join('\n')}
 Already collected details (do not ask for these again unless verifying):
 ${collectedList.map(item => `- ${item}`).join('\n')}
 
+${campaignFocusPrompt}
+
 CRITICAL INSTRUCTIONS:
 1. You MUST speak with a natural, warm Indian English voice tone and pacing (natural rhythm, fillers, and professional Indian medical conversational decorum).
 2. Be extremely conversational, friendly, and brief (1-2 sentences per turn). Ask for one missing detail at a time. Do NOT list all questions at once.
@@ -294,6 +320,15 @@ CRITICAL RULES FOR RESPONSES:
 4. Be supportive and acknowledge their efforts, emphasizing low-glycemic eating and stress reduction.
 5. If they ask about their doctor, mention Dr. Samarth Gupta as their endocrinologist lead.
 6. Address the patient warmly by their name (e.g. Lisha).`;
+      } else {
+        // Guest user who finished onboarding but has no custom persona yet
+        voiceSystemInstruction = `${YHEALTH_PERSONA}
+
+${campaignFocusPrompt}
+
+CRITICAL RULES FOR RESPONSES:
+1. You are communicating via real-time speech. Keep your responses extremely short, concise, and natural (1-3 sentences max). Never output long explanations, markdown lists, bullet points, or complex tables because they are hard to understand when spoken!
+2. You MUST speak with a natural, warm Indian English voice tone and pacing (natural rhythm, fillers, and professional Indian medical conversational decorum) as specified in the speech instructions above.`;
       }
 
       const userName = useChatStore.getState().userName;
@@ -529,18 +564,45 @@ CRITICAL RULES FOR RESPONSES:
             const userSpeech = msg.inputAudioTranscription?.parts?.[0]?.text;
             if (userSpeech) {
               setTranscript(userSpeech);
+              userSpeechAccumulatedRef.current += userSpeech;
             }
 
             // AI Speech transcription preview
             const aiSpeech = msg.serverContent?.modelTurn?.parts?.[0]?.text;
             if (aiSpeech) {
               setTranscript(aiSpeech);
+              aiSpeechAccumulatedRef.current += aiSpeech;
             }
 
             // If model completes turn, restore listening state
             if (msg.serverContent?.turnComplete) {
               setState('listening');
               setAudioVolume(0);
+
+              const inputContent = userSpeechAccumulatedRef.current.trim();
+              const outputContent = aiSpeechAccumulatedRef.current.trim();
+
+              if (inputContent || outputContent) {
+                const store = useChatStore.getState();
+                const activeId = store.activeChatId || store.sessionId || 'voice-session';
+
+                fetch('/api/trace', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    name: 'voice-interaction',
+                    input: inputContent || '[Voice session initialized]',
+                    output: outputContent,
+                    model: GEMINI_LIVE_MODEL,
+                    userId: store.userName || 'anonymous',
+                    sessionId: activeId,
+                  })
+                }).catch(err => console.warn('Langfuse voice tracing failed:', err));
+              }
+
+              // Reset accumulated refs for the next turn
+              userSpeechAccumulatedRef.current = "";
+              aiSpeechAccumulatedRef.current = "";
             }
           },
 
