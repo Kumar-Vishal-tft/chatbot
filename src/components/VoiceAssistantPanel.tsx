@@ -793,7 +793,7 @@ CRITICAL RULES FOR RESPONSES:
                   }`} />
                 </span>
                 <span className="text-[11px] font-extrabold uppercase tracking-widest text-neutral-400 dark:text-neutral-500">
-                  {state === 'connecting' ? 'Connecting to Pravakta Stack...' :
+                  {state === 'connecting' ? 'Connecting to YHealth...' :
                    state === 'listening' ? 'Listening...' :
                    state === 'speaking' ? 'YHealth is speaking...' :
                    state === 'error' ? 'Connection Error' : 'Ready'}
