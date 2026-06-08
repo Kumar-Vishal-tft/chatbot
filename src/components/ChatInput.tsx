@@ -340,11 +340,11 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
 
       {/* Floating CTA row (only shows when clinical profiling flow is not active AND user is not an existing patient) */}
       {!isExistingPatient && onboardingStep === 'completed' && (
-        <div className="w-full max-w-[860px] mx-auto mb-2.5 flex flex-wrap items-center justify-center gap-2 px-2 select-none animate-fade-in">
+        <div className="w-full max-w-[860px] mx-auto mb-2.5 flex flex-nowrap md:flex-wrap items-center justify-start md:justify-center gap-2 overflow-x-auto no-scrollbar px-4 md:px-2 select-none animate-fade-in">
           {/* 1. Download YHealth App */}
           <button
             onClick={() => setCtaModal('download')}
-            className="group flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold
+            className="group flex flex-shrink-0 items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold
               bg-white/80 dark:bg-black/20 
               border border-black/[0.08] dark:border-white/[0.08]
               hover:border-black/20 dark:hover:border-white/25
@@ -361,7 +361,7 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
           {/* 2. Speak to YHealth Expert */}
           <button
             onClick={() => setCtaModal('expert')}
-            className="group flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold
+            className="group flex flex-shrink-0 items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold
               bg-white/80 dark:bg-black/20 
               border border-black/[0.08] dark:border-white/[0.08]
               hover:border-black/20 dark:hover:border-white/25
@@ -376,10 +376,10 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
           </button>
 
           {/* 3. Existing Patient */}
-          {!isVerified && onVerify && (
+          {!isExistingPatient && onVerify && (
             <button
               onClick={onVerify}
-              className="group flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold
+              className="group flex flex-shrink-0 items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold
                 bg-white/80 dark:bg-black/20 
                 border border-black/[0.08] dark:border-white/[0.08]
                 hover:border-black/20 dark:hover:border-white/25
@@ -390,14 +390,14 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
                 transition-all duration-300 active:scale-95 cursor-pointer"
             >
               <UserCheck className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 group-hover:scale-110 transition-transform duration-300" />
-              <span>Existing Patient?</span>
+              <span>Existing Patient</span>
             </button>
           )}
 
           {/* 4. About YHealth */}
           <button
             onClick={() => setCtaModal('about')}
-            className="group flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold
+            className="group flex flex-shrink-0 items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold
               bg-white/80 dark:bg-black/20 
               border border-black/[0.08] dark:border-white/[0.08]
               hover:border-black/20 dark:hover:border-white/25
