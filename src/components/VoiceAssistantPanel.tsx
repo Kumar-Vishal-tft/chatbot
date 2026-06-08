@@ -758,6 +758,77 @@ CRITICAL RULES FOR RESPONSES:
     }
   };
 
+  const handleCloseSession = useCallback(() => {
+    const store = useChatStore.getState();
+    const activeId = store.activeChatId || store.sessionId || 'voice-session';
+    
+    // 1. Gather all profile details
+    const name = store.onboardingProfile?.name || store.userName || 'Anonymous';
+    const age = parseInt(String(store.onboardingProfile?.age)) || 0;
+    const gender = store.onboardingProfile?.gender || '';
+    const phoneNumber = store.onboardingProfile?.phone_number || '';
+    const utmCampaign = store.utm_campaign || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_campaign') : null) || 'default';
+    
+    const additionalDetails = {
+      health_goal: store.onboardingProfile?.health_goal || '',
+      conditions: store.onboardingProfile?.conditions || [],
+      feeling_note: store.onboardingProfile?.feeling_note || ''
+    };
+
+    // 2. Gather history/chat data
+    const msgs = activeId ? (store.messages[activeId] || []) : [];
+    const chatPairs: { user: string; agent: string }[] = [];
+
+    for (let i = 0; i < msgs.length; i++) {
+      if (msgs[i].sender === 'user') {
+        const userContent = msgs[i].content;
+        let agentContent = '';
+        for (let j = i + 1; j < msgs.length; j++) {
+          if (msgs[j].sender === 'assistant') {
+            agentContent = msgs[j].content;
+            break;
+          }
+        }
+        chatPairs.push({
+          user: userContent,
+          agent: agentContent,
+        });
+      }
+    }
+
+    // 3. Send payload to backend via Next.js proxy route
+    fetch(`/api/leads/${activeId}/session`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'accept': 'application/json',
+      },
+      body: JSON.stringify({
+        name,
+        age,
+        gender: gender.toLowerCase(),
+        phone_number: phoneNumber,
+        session_id: activeId,
+        utm_campaign: utmCampaign,
+        history: chatPairs,
+        additional_details: additionalDetails
+      })
+    })
+    .then(async (res) => {
+      if (res.ok) {
+        console.log('Voice session data synced to backend successfully on close:', await res.json());
+      } else {
+        console.warn('Failed to sync voice session data to backend on close:', res.status, await res.text());
+      }
+    })
+    .catch((err) => {
+      console.error('Error syncing voice session data on close:', err);
+    });
+
+    // 4. Finally trigger standard onClose callback
+    onClose();
+  }, [onClose]);
+
   const handleTryClose = () => {
     triggerHaptic(15);
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
@@ -765,7 +836,7 @@ CRITICAL RULES FOR RESPONSES:
     if (isMobile && state === 'listening' && transcript.length > 5) {
       setShowConfirmClose(true);
     } else {
-      onClose();
+      handleCloseSession();
     }
   };
 
@@ -923,7 +994,7 @@ CRITICAL RULES FOR RESPONSES:
               <button
                 onClick={() => {
                   triggerHaptic(15);
-                  onClose();
+                  handleCloseSession();
                 }}
                 className="px-4 py-2 rounded-full bg-red-500 hover:bg-red-600 text-white text-xs font-extrabold transition cursor-pointer"
               >
