@@ -184,6 +184,12 @@ export default function Home() {
       persona: config.persona,
     });
 
+    // Capture dynamic persona loaded event for UTM-based flow
+    captureAnalyticsEvent('persona_loaded', {
+      persona: config.persona || 'general_agent',
+      campaign: resolvedCampaign,
+    });
+
 
 
     // Load persisted chat history
@@ -255,9 +261,35 @@ export default function Home() {
     return () => clearTimeout(t);
   }, [showExistingPatientCard]);
 
+  // Track home dashboard loaded
+  useEffect(() => {
+    if (stage === 'chat') {
+      captureAnalyticsEvent('home_loaded');
+    }
+  }, [stage]);
+
+  // Track existing patient restore banner shown
+  useEffect(() => {
+    if (!isVerified && !hasMessages && showExistingPatientCard && bannerVisible) {
+      captureAnalyticsEvent('patient_restore_banner_shown');
+    }
+  }, [isVerified, hasMessages, showExistingPatientCard, bannerVisible]);
+
   /* ── Navigation handlers ── */
   const skipWelcome = () => {
     localStorage.setItem('yhealth_visited_splash_v1', 'true');
+
+    // Retrieve UTM parameters for Get Started tracking
+    const dynamicUtmSource = typeof window !== 'undefined' ? sessionStorage.getItem('utm_source') : null;
+    const dynamicUtmCampaign = typeof window !== 'undefined' ? sessionStorage.getItem('utm_campaign') : null;
+
+    captureAnalyticsEvent('get_started_clicked', {
+      tenant: 'yhealth',
+      session_type: 'anonymous',
+      utm_campaign: dynamicUtmCampaign,
+      utm_source: dynamicUtmSource,
+    });
+
     setStage('chat');
     setShowTour(true);
   };
@@ -581,7 +613,10 @@ export default function Home() {
                     <p className="text-[10px] md:text-xs text-[#666] dark:text-[#8a8a8a] mt-0.5 leading-tight">Verify your number to restore reports & AI memory.</p>
                   </div>
                   <button
-                    onClick={() => setShowVerification(true)}
+                    onClick={() => {
+                      captureAnalyticsEvent('verify_mobile_clicked');
+                      setShowVerification(true);
+                    }}
                     className="flex-shrink-0 h-8 md:h-10 px-4 md:px-6 rounded-full font-bold text-[11px] md:text-xs bg-[#111111] dark:bg-white text-white dark:text-black shadow-sm hover:scale-[1.03] active:scale-[0.97] transition cursor-pointer"
                   >
                     Verify Mobile Number
@@ -601,7 +636,16 @@ export default function Home() {
               </div>
             )}
           </AnimatePresence>
-          <ChatInput onAttachClick={() => setShowUpload(true)} onVerify={() => setShowVerification(true)} />
+          <ChatInput 
+            onAttachClick={() => {
+              captureAnalyticsEvent('upload_clicked');
+              setShowUpload(true);
+            }} 
+            onVerify={() => {
+              captureAnalyticsEvent('verify_mobile_clicked');
+              setShowVerification(true);
+            }} 
+          />
         </div>
       </div>
 

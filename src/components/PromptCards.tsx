@@ -116,13 +116,28 @@ export default function PromptCards({ onVerify, isVerified = false, verifiedName
           <button
             key={card.id ?? idx}
             onClick={() => {
+              // Determine feature type for Umami tracking
+              let featureType = 'general_health';
+              const lowTitle = card.title.toLowerCase();
+              const lowPrompt = ('prompt' in card ? card.prompt : '').toLowerCase();
+              const lowId = (card.id || '').toLowerCase();
+              if (lowId.includes('report') || lowId.includes('blood') || lowTitle.includes('report') || lowTitle.includes('analyze') || lowPrompt.includes('report')) {
+                featureType = 'analyze_report';
+              } else if (lowId.includes('symptom') || lowTitle.includes('symptom') || lowPrompt.includes('symptom')) {
+                featureType = 'check_symptoms';
+              } else if (lowId.includes('diet') || lowId.includes('nutrition') || lowTitle.includes('diet') || lowTitle.includes('nutrition') || lowPrompt.includes('diet') || lowPrompt.includes('nutrition') || lowTitle.includes('weight') || lowPrompt.includes('weight')) {
+                featureType = 'diet_guidance';
+              } else {
+                featureType = 'general_health';
+              }
+
               // Capture card click event in analytics
-              captureAnalyticsEvent('card_click', {
+              captureAnalyticsEvent('feature_selected', {
+                feature: featureType,
                 utm_campaign: activeCampaign,
                 persona: activePersona,
                 program: activeProgram,
-                card_title: card.title,
-                card_prompt: 'prompt' in card ? card.prompt : ''
+                card_title: card.title
               });
 
               if ('prompt' in card && card.prompt) sendMessage(card.prompt);

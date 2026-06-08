@@ -4,6 +4,7 @@ import { useChatStore } from '@/store/chatStore';
 import { SendHorizontal, Mic, Lock, Plus, X, FileText, Pill, Image as ImageIcon, Camera, Activity, Sparkles, Smartphone, UserCheck } from 'lucide-react';
 import { useRef, useState, useEffect, useCallback } from 'react';
 import VoiceAssistantPanel from './VoiceAssistantPanel';
+import { captureAnalyticsEvent } from '@/utils/analytics';
 
 /* ─── Typewriter prompts ─────────────────────────────────────── */
 const PROMPTS = [
@@ -113,6 +114,7 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
   const menuRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const isSubmitting = useRef(false);
+  const hasTrackedComposing = useRef(false);
 
   // Typewriter is active when: input is empty AND not focused AND menu is closed AND onboarding is not active
   const isOnboardingActive = onboardingStep !== 'completed' && onboardingStep !== 'not_started';
@@ -192,6 +194,7 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
     isSubmitting.current = true;
     sendMessage(text.trim());
     setText('');
+    hasTrackedComposing.current = false;
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     setTimeout(() => {
       isSubmitting.current = false;
@@ -217,6 +220,7 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
 
   const openVoiceAssistant = () => {
     if (isDisabled) return;
+    captureAnalyticsEvent('voice_opened');
     setShowVoicePanel(true);
   };
 
@@ -515,7 +519,14 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
           <textarea
             ref={textareaRef}
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              const val = e.target.value;
+              setText(val);
+              if (val.trim() && !hasTrackedComposing.current) {
+                hasTrackedComposing.current = true;
+                captureAnalyticsEvent('message_composing_started');
+              }
+            }}
             onKeyDown={handleKeyDown}
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}

@@ -10,6 +10,7 @@ import { activePersonaManager } from '@/persona/PersonaManager';
 import { PersonaContextBuilder } from '@/persona/PersonaContextBuilder';
 import { useChatStore } from '@/store/chatStore';
 import { fetchPredefinedPersona, getOfflineCampaignFocusPrompt } from '@/store/api';
+import { captureAnalyticsEvent } from '@/utils/analytics';
 
 // Types of voice states
 export type VoiceState = 'idle' | 'connecting' | 'listening' | 'paused' | 'thinking' | 'speaking' | 'error';
@@ -61,6 +62,7 @@ export default function VoiceAssistantPanel({
   // Voice transcription accumulation refs for Langfuse tracing
   const userSpeechAccumulatedRef = useRef<string>("");
   const aiSpeechAccumulatedRef = useRef<string>("");
+  const sessionStartTimeRef = useRef<number | null>(null);
 
   // Real-time audio amplitude for waveform syncing (0 to 1 scale)
   const [audioVolume, setAudioVolume] = useState(0);
@@ -140,12 +142,20 @@ export default function VoiceAssistantPanel({
     if (micStreamRef.current) {
       micStreamRef.current.getTracks().forEach(t => t.stop());
       micStreamRef.current = null;
+      captureAnalyticsEvent('voice_recording_completed');
     }
     if (sessionRef.current) {
       try {
         sessionRef.current.close();
       } catch (_) {}
       sessionRef.current = null;
+
+      let durationSeconds = 0;
+      if (sessionStartTimeRef.current) {
+        durationSeconds = Math.round((Date.now() - sessionStartTimeRef.current) / 1000);
+        sessionStartTimeRef.current = null;
+      }
+      captureAnalyticsEvent('voice_session_ended', { duration_seconds: durationSeconds });
     }
     userSpeechAccumulatedRef.current = "";
     aiSpeechAccumulatedRef.current = "";
@@ -160,6 +170,7 @@ export default function VoiceAssistantPanel({
         video: false
       });
       micStreamRef.current = stream;
+      captureAnalyticsEvent('voice_recording_started');
 
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       const micCtx = new AudioCtx({ sampleRate: INPUT_SAMPLE_RATE });
@@ -301,7 +312,7 @@ ${collectedList.map(item => `- ${item}`).join('\n')}
 ${campaignFocusPrompt}
 
 CRITICAL INSTRUCTIONS:
-1. You MUST speak with a natural, warm Indian English voice tone and pacing (natural rhythm, fillers, and professional Indian medical conversational decorum).
+1. You MUST speak with a natural, warm Indian English voice tone, accent, and pacing (using Indian English speech syntax, polite phrasing like "Kindly share" or "Please let me know", and common Indian medical terms like "acidity", "loose motions", "body pain", "giddiness", or "tension" when appropriate to match typical Indian conversational style and decorum).
 2. Be extremely conversational, friendly, and brief (1-2 sentences per turn). Ask for one missing detail at a time. Do NOT list all questions at once.
 3. If the user asks general health questions during onboarding, answer them briefly (1-2 sentences) and gently pivot back to collecting the missing details.
 4. Once you have collected all details, call the "submitLeadProfile" tool to save and register their profile.
@@ -315,7 +326,7 @@ ${clinicalContextBlock}
 
 CRITICAL RULES FOR RESPONSES:
 1. You are communicating via real-time speech. Keep your responses extremely short, concise, and natural (1-3 sentences max). Never output long explanations, markdown lists, bullet points, or complex tables because they are hard to understand when spoken!
-2. You MUST speak with a natural, warm Indian English voice tone and pacing (natural rhythm, fillers, and professional Indian medical conversational decorum) as specified in the speech instructions above.
+2. You MUST speak with a natural, warm Indian English voice tone, accent, and pacing (using Indian English speech syntax, polite phrasing like "Kindly share" or "Please let me know", and common Indian medical terms like "acidity", "loose motions", "body pain", "giddiness", or "tension" when appropriate to match typical Indian conversational style and decorum).
 3. Suggest consulting Samarth Gupta (Endocrinologist) when relevant.
 4. Be supportive and acknowledge their efforts, emphasizing low-glycemic eating and stress reduction.
 5. If they ask about their doctor, mention Dr. Samarth Gupta as their endocrinologist lead.
@@ -328,7 +339,7 @@ ${campaignFocusPrompt}
 
 CRITICAL RULES FOR RESPONSES:
 1. You are communicating via real-time speech. Keep your responses extremely short, concise, and natural (1-3 sentences max). Never output long explanations, markdown lists, bullet points, or complex tables because they are hard to understand when spoken!
-2. You MUST speak with a natural, warm Indian English voice tone and pacing (natural rhythm, fillers, and professional Indian medical conversational decorum) as specified in the speech instructions above.`;
+2. You MUST speak with a natural, warm Indian English voice tone, accent, and pacing (using Indian English speech syntax, polite phrasing like "Kindly share" or "Please let me know", and common Indian medical terms like "acidity", "loose motions", "body pain", "giddiness", or "tension" when appropriate to match typical Indian conversational style and decorum).`;
       }
 
       const userName = useChatStore.getState().userName;
@@ -384,6 +395,8 @@ CRITICAL RULES FOR RESPONSES:
         callbacks: {
           onopen: () => {
             setState('listening');
+            sessionStartTimeRef.current = Date.now();
+            captureAnalyticsEvent('voice_session_started');
             sessionPromise.then(session => {
               sessionRef.current = session;
               
@@ -416,132 +429,133 @@ CRITICAL RULES FOR RESPONSES:
                 if (call.name === 'submitLeadProfile') {
                   const args = call.args || {};
                   
-                  // 1. Update the Zustand Chat Store with the gathered details
-                  const store = useChatStore.getState();
-                  const completeProfile = {
-                    name: args.name || store.onboardingProfile.name || '',
-                    age: String(args.age || store.onboardingProfile.age || ''),
-                    phone_number: args.phone_number || store.onboardingProfile.phone_number || '',
-                    gender: args.gender || store.onboardingProfile.gender || '',
-                    health_goal: args.health_goal || store.onboardingProfile.health_goal || 'General wellness',
-                    conditions: args.conditions || store.onboardingProfile.conditions || [],
-                    feeling_note: args.feeling_note || store.onboardingProfile.feeling_note || '',
-                    mobile_verified: true
-                  };
-                  
-                  // 2. Perform the exact submission to lead endpoint!
-                  const sessionUUID = store.sessionId || store.activeChatId || '';
-                  const ageNum = parseInt(String(completeProfile.age)) || 0;
-                  
-                  fetch('/api/leads', {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                      session_id: sessionUUID,
-                      name: completeProfile.name,
-                      age: ageNum,
-                      phone_number: completeProfile.phone_number,
-                      gender: completeProfile.gender,
-                      additional_details: {
-                        health_goal: completeProfile.health_goal,
-                        conditions: completeProfile.conditions,
-                        feeling_note: completeProfile.feeling_note,
-                        utm_campaign: store.utm_campaign || sessionStorage.getItem('utm_campaign') || 'default',
-                      }
-                    })
-                  })
-                  .then(async (res) => {
-                    if (res.ok) {
-                      console.log('Lead captured via Voice and sent to backend successfully:', await res.json());
-                    }
-                  })
-                  .catch(err => {
-                    console.error('Failed to submit voice lead:', err);
-                  });
-                  
-                  // 3. Save to localStorage to persist lead completion state
-                  if (typeof window !== 'undefined') {
-                    localStorage.setItem('yhealth_lead_v1', JSON.stringify({
-                      name: completeProfile.name,
-                      timestamp: new Date().toISOString(),
-                      onboarding: completeProfile,
-                    }));
-                  }
-                  
-                  // 4. Update the Zustand store to complete onboarding
-                  store.setOnboardingProfile(completeProfile);
-                  store.setUserName(completeProfile.name);
-                  store.setOnboardingStep('completed');
-                  store.setIsVerified(true);
-
-                  // 5. Sync details directly to text chatbot history on the same session ID
-                  let activeId = store.activeChatId;
-                  if (!activeId && store.chatSessions.length > 0) {
-                    activeId = store.chatSessions[0].id;
-                  }
-
-                  if (activeId) {
-                    const conditionsSummary =
-                      completeProfile.conditions && completeProfile.conditions.length > 0
-                        ? completeProfile.conditions.join(', ')
-                        : 'None mentioned';
-
-                    const confirmationMsg = `You're all set, **${completeProfile.name || 'there'}**! 🎉 (Profile gathered via Voice)\n\nHere's a quick look at your profile:\n*   **Age / Gender:** ${completeProfile.age || '—'} / ${completeProfile.gender || '—'}\n*   **Phone:** ${completeProfile.phone_number || '—'}\n*   **Health Goal:** ${completeProfile.health_goal || 'General wellness'}\n*   **Conditions:** ${conditionsSummary}\n*   **Additional Note:** ${completeProfile.feeling_note || 'None'}\n\nWhat would you like to explore today?\n\n[FollowUps: Check Symptoms | Analyze Report | Diet Guidance | Medicine Help]`;
-
-                    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                    const systemBotMsg = {
-                      id: Math.random().toString(36).substring(7),
-                      sender: 'assistant' as const,
-                      content: confirmationMsg,
-                      timestamp,
-                    };
-
-                    useChatStore.setState((state) => {
-                      const nextMessages = {
-                        ...state.messages,
-                        [activeId!]: [...(state.messages[activeId!] || []), systemBotMsg]
-                      };
-
-                      // Save and sync chat state
-                      if (typeof window !== 'undefined') {
-                        localStorage.setItem('yhealth_chats_v1', JSON.stringify(nextMessages));
-                      }
-
-                      // Post sync to backend proxy
-                      fetch('/api/session/save', {
-                        method: 'POST',
-                        headers: {
-                          'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                          sessionId: sessionUUID,
-                          sessions: state.chatSessions,
-                          messages: nextMessages,
-                        })
-                      }).catch(err => console.error('Failed to sync session to backend:', err));
-
-                      return { messages: nextMessages };
-                    });
-                  }
-                  
-                  // 5. Send function response back to Gemini Live socket
+                  // 1. Immediately send function response back to Gemini Live socket to avoid any delay
                   sessionPromise.then(session => {
                     try {
                       session.sendToolResponse({
                         functionResponses: [{
+                          id: call.id,
+                          name: call.name,
                           response: { 
                             success: true,
                             message: "Onboarding and lead registration completed successfully. Please warmly thank the user by their name and welcome them to YHealth!"
-                          },
-                          id: call.id
+                          }
                         }]
                       });
                     } catch (e) {
                       console.error('Failed to send tool response:', e);
                     }
                   });
+
+                  // 2. Perform all backend/state updates asynchronously in the background so the user experience is completely smooth and unblocked
+                  setTimeout(() => {
+                    const store = useChatStore.getState();
+                    const completeProfile = {
+                      name: args.name || store.onboardingProfile.name || '',
+                      age: String(args.age || store.onboardingProfile.age || ''),
+                      phone_number: args.phone_number || store.onboardingProfile.phone_number || '',
+                      gender: args.gender || store.onboardingProfile.gender || '',
+                      health_goal: args.health_goal || store.onboardingProfile.health_goal || 'General wellness',
+                      conditions: args.conditions || store.onboardingProfile.conditions || [],
+                      feeling_note: args.feeling_note || store.onboardingProfile.feeling_note || '',
+                      mobile_verified: true
+                    };
+
+                    const sessionUUID = store.sessionId || store.activeChatId || '';
+                    const ageNum = parseInt(String(completeProfile.age)) || 0;
+
+                    // Lead submission to backend
+                    fetch('/api/leads', {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                      },
+                      body: JSON.stringify({
+                        session_id: sessionUUID,
+                        name: completeProfile.name,
+                        age: ageNum,
+                        phone_number: completeProfile.phone_number,
+                        gender: completeProfile.gender,
+                        additional_details: {
+                          health_goal: completeProfile.health_goal,
+                          conditions: completeProfile.conditions,
+                          feeling_note: completeProfile.feeling_note,
+                          utm_campaign: store.utm_campaign || sessionStorage.getItem('utm_campaign') || 'default',
+                        }
+                      })
+                    })
+                    .then(async (res) => {
+                      if (res.ok) {
+                        console.log('Lead captured via Voice and sent to backend successfully:', await res.json());
+                      }
+                    })
+                    .catch(err => {
+                      console.error('Failed to submit voice lead:', err);
+                    });
+
+                    // Save to localStorage
+                    if (typeof window !== 'undefined') {
+                      localStorage.setItem('yhealth_lead_v1', JSON.stringify({
+                        name: completeProfile.name,
+                        timestamp: new Date().toISOString(),
+                        onboarding: completeProfile,
+                      }));
+                    }
+
+                    // Update Zustand store
+                    store.setOnboardingProfile(completeProfile);
+                    store.setUserName(completeProfile.name);
+                    store.setOnboardingStep('completed');
+                    store.setIsVerified(true);
+
+                    // Sync details to text chat history
+                    let activeId = store.activeChatId;
+                    if (!activeId && store.chatSessions.length > 0) {
+                      activeId = store.chatSessions[0].id;
+                    }
+
+                    if (activeId) {
+                      const conditionsSummary =
+                        completeProfile.conditions && completeProfile.conditions.length > 0
+                          ? completeProfile.conditions.join(', ')
+                          : 'None mentioned';
+
+                      const confirmationMsg = `You're all set, **${completeProfile.name || 'there'}**! 🎉 (Profile gathered via Voice)\n\nHere's a quick look at your profile:\n*   **Age / Gender:** ${completeProfile.age || '—'} / ${completeProfile.gender || '—'}\n*   **Phone:** ${completeProfile.phone_number || '—'}\n*   **Health Goal:** ${completeProfile.health_goal || 'General wellness'}\n*   **Conditions:** ${conditionsSummary}\n*   **Additional Note:** ${completeProfile.feeling_note || 'None'}\n\nWhat would you like to explore today?\n\n[FollowUps: Check Symptoms | Analyze Report | Diet Guidance | Medicine Help]`;
+
+                      const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                      const systemBotMsg = {
+                        id: Math.random().toString(36).substring(7),
+                        sender: 'assistant' as const,
+                        content: confirmationMsg,
+                        timestamp,
+                      };
+
+                      useChatStore.setState((state) => {
+                        const nextMessages = {
+                          ...state.messages,
+                          [activeId!]: [...(state.messages[activeId!] || []), systemBotMsg]
+                        };
+
+                        if (typeof window !== 'undefined') {
+                          localStorage.setItem('yhealth_chats_v1', JSON.stringify(nextMessages));
+                        }
+
+                        fetch('/api/session/save', {
+                          method: 'POST',
+                          headers: {
+                            'Content-Type': 'application/json',
+                          },
+                          body: JSON.stringify({
+                            sessionId: sessionUUID,
+                            sessions: state.chatSessions,
+                            messages: nextMessages,
+                          })
+                        }).catch(err => console.error('Failed to sync session to backend:', err));
+
+                        return { messages: nextMessages };
+                      });
+                    }
+                  }, 0);
                 }
               }
             }

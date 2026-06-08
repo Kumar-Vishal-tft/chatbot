@@ -38,9 +38,20 @@ const STEPS = [
     inputMode: 'tel' as React.HTMLAttributes<HTMLInputElement>['inputMode'],
     validate: (v: string) => {
       const digits = v.replace(/\D/g, '');
-      return digits.length >= 7 && digits.length <= 15
-        ? null
-        : 'Please enter a valid mobile number.';
+      const startsWithPlus = v.trim().startsWith('+');
+      let isPhoneValid = false;
+
+      if (digits.length === 10) {
+        isPhoneValid = /^[6-9]\d{9}$/.test(digits);
+      } else if (digits.length === 11) {
+        isPhoneValid = /^0[6-9]\d{9}$/.test(digits);
+      } else if (digits.length === 12) {
+        isPhoneValid = /^91[6-9]\d{9}$/.test(digits);
+      } else if (startsWithPlus) {
+        isPhoneValid = digits.length >= 10 && digits.length <= 15;
+      }
+
+      return isPhoneValid ? null : 'Please enter a valid mobile number.';
     },
   },
   {

@@ -419,8 +419,16 @@ export async function verifyUserData(
   step: Extract<OnboardingStep, 'asked_name' | 'asked_age'>,
   content: string
 ): Promise<{ isValid: boolean; parsedValue: string; isQuestionOrQuery?: boolean; errorMessage?: string }> {
-  if (step === 'asked_name' && isGreetingOrFiller(content)) {
-    return { isValid: false, parsedValue: '', isQuestionOrQuery: true, errorMessage: 'Input is a greeting or chatbot keyword' };
+  if (step === 'asked_name') {
+    const trimmedLower = content.trim().toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?]/g, "").trim();
+    const pureGreetings = [
+      'hi', 'hello', 'hey', 'yo', 'sup', 'ola', 'namaste', 'hola', 'hallo',
+      'good morning', 'good afternoon', 'good evening', 'good day', 'welcome',
+      'hi there', 'hello there', 'hey there', 'hi yhealth', 'hello yhealth', 'hi assistant', 'hello assistant'
+    ];
+    if (pureGreetings.includes(trimmedLower)) {
+      return { isValid: false, parsedValue: '', isQuestionOrQuery: true, errorMessage: 'Input is a greeting or chatbot keyword' };
+    }
   }
 
   let systemInstruction = '';

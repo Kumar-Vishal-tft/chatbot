@@ -58,11 +58,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
         localStorage.setItem('theme', nextTheme);
         document.documentElement.classList.toggle('dark', nextTheme === 'dark');
       }
+      captureAnalyticsEvent('theme_toggled', { theme: nextTheme });
       return { theme: nextTheme };
     }),
 
   // ── Sidebar ───────────────────────────────────────────────────────────────
-  toggleSidebar: () => set((state) => ({ sidebarExpanded: !state.sidebarExpanded })),
+  toggleSidebar: () =>
+    set((state) => {
+      const nextVal = !state.sidebarExpanded;
+      captureAnalyticsEvent('sidebar_toggled', { expanded: nextVal });
+      return { sidebarExpanded: nextVal };
+    }),
   setSidebarExpanded: (expanded) => set({ sidebarExpanded: expanded }),
 
   // ── Onboarding Setters ────────────────────────────────────────────────────
@@ -95,6 +101,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         : 'New Chat',
       timestamp: time.toLocaleDateString([], { month: 'short', day: 'numeric' }),
     };
+
+    captureAnalyticsEvent('chat_created', { initial_message_present: !!initialMessage });
 
     set((state) => {
       const nextSessions = [newSession, ...state.chatSessions];
@@ -174,9 +182,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
       timestamp,
     };
 
+    // Track message sent
+    const campaignKey = get().utm_campaign || 'default';
+    const config = CAMPAIGN_CONFIG[campaignKey] || CAMPAIGN_CONFIG.default;
+    const currentPersona = get().persona?.identity?.first_name 
+      ? `${get().persona.identity.first_name} ${get().persona.identity.last_name || ''}`.trim()
+      : (config.persona || 'general_agent');
+
+    captureAnalyticsEvent('message_sent', {
+      length: content.length,
+      persona: currentPersona,
+    });
+
     // Update chat title from first user message
     const currentMessages = get().messages[chatId] || [];
     if (currentMessages.length === 0) {
+      captureAnalyticsEvent('chat_started');
       set((state) => ({
         chatSessions: state.chatSessions.map((s) =>
           s.id === chatId
@@ -218,7 +239,65 @@ Could you rephrase that? Try something like:
         nextBotMessageType = 'error';
       }
 
-      // ── 2. Greeting ── ALL handled by LLM, zero hardcoded strings ─────────────
+      // ── 2. First-time name detection & onboarding initiation ──
+      else if (!isVerified && onboardingStep === 'not_started' && (
+        /\b(my name|name is|i am|i'm|call me|introducing|myself|this is)\b/i.test(content) ||
+        (content.trim().split(/\s+/).length <= 2 && 
+         !isGreeting && 
+         !/\b(headache|fever|pain|blood|sugar|cough|cold|pressure|heart|weight|diet|food|symptom|help|what|how|why|can|glucose|hba1c|report|check|test|run|do|make|show)\b/i.test(content))
+      )) {
+        const nameVerification = await verifyUserData('asked_name', content);
+        if (nameVerification.isValid) {
+          nextProfile.name = nameVerification.parsedValue;
+          set({ userName: nameVerification.parsedValue, onboardingProfile: nextProfile, onboardingStep: 'asked_age', greetingShown: true });
+          
+          matchedResponse = `Nice to meet you, **${nameVerification.parsedValue}**! Welcome to YHealth — your personal clinical intelligence assistant.
+          
+**How old are you?** *(This helps me give you better guidance)*`;
+          
+          nextStep = 'asked_age';
+          nextBotMessageType = 'onboarding_question';
+          
+          captureAnalyticsEvent('onboarding_step_completed', {
+            step: 'not_started',
+            next_step: 'asked_age',
+          });
+        } else {
+          // If the check fails or returns invalid, fall back to greeting or health query logic
+          if (isGreeting) {
+            const isFirstTime = !greetingShown;
+            const history = get().messages[chatId] || [];
+            const hasPersona = !!get().persona || !!activePersonaManager.getRawPersona();
+            const greetingText = await fetchGreetingResponse(
+              content,
+              isFirstTime,
+              userName || undefined,
+              history.slice(-11, -1),
+              hasPersona
+            );
+            matchedResponse = greetingText;
+            nextBotMessageType = 'greeting';
+            if (isFirstTime) {
+              nextStep = 'asked_name';
+              set({ greetingShown: true, onboardingStep: 'asked_name' });
+            }
+          } else {
+            const apiReply = await fetchGeminiResponse(content, [], nextProfile);
+            if (!greetingShown) {
+              matchedResponse = `${apiReply}\n\n---\n\nBy the way — I'm YHealth, your health assistant! **What should I call you?**`;
+              nextStep = 'asked_name';
+              set({ greetingShown: true });
+            } else {
+              matchedResponse = `${apiReply}\n\n---\n\nJust a reminder — I'd love to personalize this for you. **What's your name?**`;
+              nextStep = 'asked_name';
+            }
+            nextBotMessageType = 'health_reply';
+            set({ onboardingStep: nextStep });
+          }
+        }
+      }
+
+      // ── 3. Greeting ── ALL handled by LLM, zero hardcoded strings ─────────────
       else if (isGreeting) {
         const isFirstTime = !greetingShown;
         const history = get().messages[chatId] || [];
@@ -346,7 +425,18 @@ Could you rephrase that? Try something like:
 
         else if (onboardingStep === 'asked_phone') {
           const cleanedPhone = content.replace(/\D/g, '');
-          const isPhoneValid = cleanedPhone.length >= 10 && cleanedPhone.length <= 15;
+          const startsWithPlus = content.trim().startsWith('+');
+          let isPhoneValid = false;
+
+          if (cleanedPhone.length === 10) {
+            isPhoneValid = /^[6-9]\d{9}$/.test(cleanedPhone);
+          } else if (cleanedPhone.length === 11) {
+            isPhoneValid = /^0[6-9]\d{9}$/.test(cleanedPhone);
+          } else if (cleanedPhone.length === 12) {
+            isPhoneValid = /^91[6-9]\d{9}$/.test(cleanedPhone);
+          } else if (startsWithPlus) {
+            isPhoneValid = cleanedPhone.length >= 10 && cleanedPhone.length <= 15;
+          }
 
           if (!isPhoneValid) {
             matchedResponse = `That doesn't look like a valid phone number. **Please share your 10-digit mobile number** so I can save your progress securely.`;
@@ -361,19 +451,159 @@ Could you rephrase that? Try something like:
         }
 
         else if (onboardingStep === 'asked_goal') {
-          nextProfile.health_goal = content;
-          matchedResponse = `Noted — **${content}** it is!\n\n**Do you have any existing medical conditions?** *(Type them out, or choose below)*\n\n[FollowUps: None | Diabetes | Hypertension | Asthma | Obesity | Metabolic health]`;
-          nextStep = 'asked_conditions';
-          nextBotMessageType = 'onboarding_question';
+          const VALID_GOALS = [
+            'Weight loss',
+            'Diabetes',
+            'Blood reports',
+            'Nutrition',
+            'Fitness',
+            'General wellness',
+            'Hypertension',
+            'GLP-1',
+            'Metabolic',
+            'Sexual Wellness',
+            'Mental Wellness',
+            'Longevity'
+          ];
+
+          const GOAL_KEYWORDS: Record<string, string> = {
+            'weight': 'Weight loss',
+            'loss': 'Weight loss',
+            'diet': 'Nutrition',
+            'nutrition': 'Nutrition',
+            'food': 'Nutrition',
+            'fitness': 'Fitness',
+            'exercise': 'Fitness',
+            'workout': 'Fitness',
+            'gym': 'Fitness',
+            'diabetes': 'Diabetes',
+            'diabetic': 'Diabetes',
+            'blood': 'Blood reports',
+            'report': 'Blood reports',
+            'reports': 'Blood reports',
+            'wellness': 'General wellness',
+            'general': 'General wellness',
+            'bp': 'Hypertension',
+            'hypertension': 'Hypertension',
+            'pressure': 'Hypertension',
+            'glp': 'GLP-1',
+            'glp-1': 'GLP-1',
+            'glp1': 'GLP-1',
+            'metabolic': 'Metabolic',
+            'metabolism': 'Metabolic',
+            'sexual': 'Sexual Wellness',
+            'mental': 'Mental Wellness',
+            'stress': 'Mental Wellness',
+            'anxiety': 'Mental Wellness',
+            'longevity': 'Longevity',
+            'aging': 'Longevity'
+          };
+
+          const normalized = content.toLowerCase();
+          const matchedSet = new Set<string>();
+
+          for (const goal of VALID_GOALS) {
+            if (normalized.includes(goal.toLowerCase())) {
+              matchedSet.add(goal);
+            }
+          }
+
+          const words = normalized.split(/[\s,.\-&]+/);
+          for (const word of words) {
+            if (GOAL_KEYWORDS[word]) {
+              matchedSet.add(GOAL_KEYWORDS[word]);
+            }
+          }
+
+          for (const key of Object.keys(GOAL_KEYWORDS)) {
+            if (key.includes(' ') && normalized.includes(key)) {
+              matchedSet.add(GOAL_KEYWORDS[key]);
+            }
+          }
+
+          if (matchedSet.size === 0) {
+            matchedResponse = `Please select one or more of the valid choices below:\n` +
+              `*   **Weight loss**\n*   **Diabetes**\n*   **Blood reports**\n*   **Nutrition**\n*   **Fitness**\n*   **General wellness**\n*   **Hypertension**\n*   **GLP-1**\n*   **Metabolic**\n*   **Sexual Wellness**\n*   **Mental Wellness**\n*   **Longevity**\n\n**What would you most like help with?**\n\n[FollowUps: Weight loss | Diabetes | Blood reports | Nutrition | Fitness | General wellness | Hypertension | GLP-1 | Metabolic | Sexual Wellness | Mental Wellness | Longevity]`;
+            nextBotMessageType = 'onboarding_question';
+            nextStep = 'asked_goal';
+          } else {
+            const matchedGoalsString = Array.from(matchedSet).join(', ');
+            nextProfile.health_goal = matchedGoalsString;
+            matchedResponse = `Noted — **${matchedGoalsString}** it is!\n\n**Do you have any existing medical conditions?** *(Type them out, or choose below)*\n\n[FollowUps: None | Diabetes | Hypertension | Asthma | Obesity | Metabolic health]`;
+            nextStep = 'asked_conditions';
+            nextBotMessageType = 'onboarding_question';
+          }
         }
 
         else if (onboardingStep === 'asked_conditions') {
-          nextProfile.conditions = content.toLowerCase().includes('none')
-            ? []
-            : content.split(',').map((c) => c.trim());
-          matchedResponse = `Got it.\n\n**Additional Note on how you are feeling?** *(Type a short note or feel free to say 'N/A' or 'None')*`;
-          nextStep = 'asked_feeling';
-          nextBotMessageType = 'onboarding_question';
+          const VALID_CONDITIONS = [
+            'None',
+            'Diabetes',
+            'Hypertension',
+            'Asthma',
+            'Obesity',
+            'Metabolic health'
+          ];
+
+          const CONDITION_KEYWORDS: Record<string, string> = {
+            'none': 'None',
+            'no': 'None',
+            'nothing': 'None',
+            'na': 'None',
+            'n/a': 'None',
+            'nil': 'None',
+            'diabetes': 'Diabetes',
+            'diabetic': 'Diabetes',
+            'sugar': 'Diabetes',
+            'hypertension': 'Hypertension',
+            'bp': 'Hypertension',
+            'pressure': 'Hypertension',
+            'asthma': 'Asthma',
+            'asthmatic': 'Asthma',
+            'obesity': 'Obesity',
+            'obese': 'Obesity',
+            'overweight': 'Obesity',
+            'metabolic': 'Metabolic health',
+            'metabolism': 'Metabolic health'
+          };
+
+          const normalized = content.toLowerCase();
+          const matchedSet = new Set<string>();
+
+          for (const condition of VALID_CONDITIONS) {
+            if (normalized.includes(condition.toLowerCase())) {
+              matchedSet.add(condition);
+            }
+          }
+
+          const words = normalized.split(/[\s,.\-&]+/);
+          for (const word of words) {
+            if (CONDITION_KEYWORDS[word]) {
+              matchedSet.add(CONDITION_KEYWORDS[word]);
+            }
+          }
+
+          for (const key of Object.keys(CONDITION_KEYWORDS)) {
+            if (key.includes(' ') && normalized.includes(key)) {
+              matchedSet.add(CONDITION_KEYWORDS[key]);
+            }
+          }
+
+          if (matchedSet.size === 0) {
+            matchedResponse = `Please select one or more of the valid choices below:\n` +
+              `*   **None**\n*   **Diabetes**\n*   **Hypertension**\n*   **Asthma**\n*   **Obesity**\n*   **Metabolic health**\n\n**Do you have any existing medical conditions?** *(Type them out, or choose below)*\n\n[FollowUps: None | Diabetes | Hypertension | Asthma | Obesity | Metabolic health]`;
+            nextBotMessageType = 'onboarding_question';
+            nextStep = 'asked_conditions';
+          } else {
+            if (matchedSet.has('None')) {
+              nextProfile.conditions = [];
+            } else {
+              nextProfile.conditions = Array.from(matchedSet);
+            }
+            matchedResponse = `Got it.\n\n**Additional Note on how you are feeling?** *(Type a short note or feel free to say 'N/A' or 'None')*`;
+            nextStep = 'asked_feeling';
+            nextBotMessageType = 'onboarding_question';
+          }
         }
 
         else if (onboardingStep === 'asked_feeling') {
@@ -479,6 +709,19 @@ Could you rephrase that? Try something like:
             .catch((err) => console.warn('Error sending lead data:', err));
         }
 
+        if (nextStep !== onboardingStep) {
+          captureAnalyticsEvent('onboarding_step_completed', {
+            step: onboardingStep,
+            next_step: nextStep,
+          });
+          if (nextStep === 'completed') {
+            captureAnalyticsEvent('onboarding_completed', {
+              age: nextProfile.age,
+              gender: nextProfile.gender,
+              health_goal: nextProfile.health_goal,
+            });
+          }
+        }
         set({ onboardingStep: nextStep, onboardingProfile: nextProfile });
       }
 
@@ -495,6 +738,12 @@ Could you rephrase that? Try something like:
           nextStep = 'asked_name';
         }
         nextBotMessageType = 'health_reply';
+        if (nextStep !== (onboardingStep as string)) {
+          captureAnalyticsEvent('onboarding_step_completed', {
+            step: onboardingStep,
+            next_step: nextStep,
+          });
+        }
         set({ onboardingStep: nextStep });
       }
 
@@ -523,6 +772,9 @@ Could you rephrase that? Try something like:
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
 
+      const messagesBefore = get().messages[chatId!] || [];
+      const isFirstAiResponse = messagesBefore.filter(m => m.sender === 'assistant').length === 0;
+
       set((state) => {
         const nextMessages = { ...state.messages, [chatId!]: [...(state.messages[chatId!] || []), assistantMessage] };
         saveChatState(state.chatSessions, nextMessages, chatId);
@@ -543,6 +795,13 @@ Could you rephrase that? Try something like:
           set({ streamingMessageId: null, activeIntervalId: null });
           saveChatState(get().chatSessions, get().messages, get().activeChatId);
           triggerDebouncedSync(get().chatSessions, get().messages, get().activeChatId);
+
+          if (isFirstAiResponse) {
+            captureAnalyticsEvent('first_ai_response');
+          }
+          if (content.toLowerCase().includes('report')) {
+            captureAnalyticsEvent('report_generated');
+          }
         } else {
           currentIdx += Math.min(Math.floor(Math.random() * 4) + 6, responseLength - currentIdx);
           const slicedText = matchedResponse.substring(0, currentIdx);

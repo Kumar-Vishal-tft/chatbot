@@ -6,6 +6,7 @@ import { ShieldCheck, X, RefreshCw, ChevronLeft, CheckCircle2, Loader2 } from 'l
 import { useChatStore, getTimeBasedGreeting } from '@/store/chatStore';
 import { BACKEND_URL } from '@/store/config';
 import { PATIENT_PERSONA_MOCK } from '@/persona/patientMock';
+import { captureAnalyticsEvent } from '@/utils/analytics';
 
 /* ─── Types ────────────────────────────────────────────── */
 export interface VerifiedUser {
@@ -34,7 +35,21 @@ function maskPhone(phone: string) {
 
 function validatePhone(v: string) {
   const d = v.replace(/\D/g, '');
-  return d.length >= 7 && d.length <= 15;
+  const startsWithPlus = v.trim().startsWith('+');
+  
+  if (d.length === 10) {
+    return /^[6-9]\d{9}$/.test(d);
+  }
+  if (d.length === 11) {
+    return /^0[6-9]\d{9}$/.test(d);
+  }
+  if (d.length === 12) {
+    return /^91[6-9]\d{9}$/.test(d);
+  }
+  if (startsWithPlus) {
+    return d.length >= 10 && d.length <= 15;
+  }
+  return false;
 }
 function getFriendlyErrorMessage(msg: string, defaultMsg: string) {
   if (!msg) return defaultMsg;
@@ -155,6 +170,7 @@ export default function VerificationPanel({ onVerified, onClose }: VerificationP
         return res.json();
       })
       .then(() => {
+        captureAnalyticsEvent('otp_sent');
         setStep('otp');
       })
       .catch(err => {
@@ -166,6 +182,7 @@ export default function VerificationPanel({ onVerified, onClose }: VerificationP
           const isMockNumber = phone.replace(/\D/g, '').endsWith('8777846383');
           if (isMockNumber) {
             console.warn('Failed to send OTP to backend. Proceeding to OTP step for offline/fallback mode.', err);
+            captureAnalyticsEvent('otp_sent');
             setStep('otp');
           } else {
             setPhoneError("We couldn't find a health profile linked to this mobile number.");
@@ -237,6 +254,7 @@ export default function VerificationPanel({ onVerified, onClose }: VerificationP
     }
     // For demo, treat "000000" as wrong
     if (code === '000000') {
+      captureAnalyticsEvent('patient_verification_failed', { reason: 'Blocked Demo OTP Code' });
       setOtpError("That code doesn't look right. Try again.");
       setOtp(Array(OTP_LENGTH).fill(''));
       setTimeout(() => otpRefs.current[0]?.focus(), 50);
@@ -286,6 +304,7 @@ export default function VerificationPanel({ onVerified, onClose }: VerificationP
         setVerifiedPatientName(finalName);
 
         // Success transition
+        captureAnalyticsEvent('patient_verified');
         setTimeout(() => {
           setStep('success');
           setTimeout(() => {
@@ -299,6 +318,7 @@ export default function VerificationPanel({ onVerified, onClose }: VerificationP
         }, 1800);
       })
       .catch(err => {
+        captureAnalyticsEvent('patient_verification_failed', { reason: err.message || "Unknown error" });
         if (err.status) {
           // Real backend validation error (e.g. 400 Bad Request / 404 Not Found)
           setOtpError(err.message || "We couldn't find a health profile linked to this mobile number.");
@@ -316,6 +336,7 @@ export default function VerificationPanel({ onVerified, onClose }: VerificationP
               : 'Neha Aggarwal';
             setVerifiedPatientName(finalName);
 
+            captureAnalyticsEvent('patient_verified');
             setTimeout(() => {
               setStep('success');
               setTimeout(() => {
