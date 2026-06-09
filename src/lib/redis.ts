@@ -24,3 +24,15 @@ redis.on('error', (err) => {
 redis.on('connect', () => {
   console.log('Successfully connected to Redis database');
 });
+
+// Initialize background sync worker
+const globalForWorker = global as unknown as { workerStarted: boolean | undefined };
+if (!globalForWorker.workerStarted) {
+  globalForWorker.workerStarted = true;
+  import('./syncWorker').then(({ startSyncWorker }) => {
+    startSyncWorker();
+  }).catch((err) => {
+    console.error('Failed to start sync worker:', err);
+  });
+}
+

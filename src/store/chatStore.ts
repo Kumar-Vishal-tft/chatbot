@@ -180,6 +180,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       sender: 'user',
       content,
       timestamp,
+      created_at: Date.now(),
     };
 
     // Track message sent
@@ -770,6 +771,7 @@ Could you rephrase that? Try something like:
         sender: 'assistant',
         content: '',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        created_at: Date.now(),
       };
 
       const messagesBefore = get().messages[chatId!] || [];
@@ -901,6 +903,7 @@ Could you rephrase that? Try something like:
       sender: 'assistant',
       content: `Welcome back, ${capitalizedName}! 👋\n\n${welcomeTemplateText}\n\n[FollowUps: ${followUpsText}]`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      created_at: Date.now(),
     };
 
     set({
@@ -952,6 +955,7 @@ Could you rephrase that? Try something like:
         sender: 'assistant',
         content: welcomeText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        created_at: Date.now(),
       };
       set((state) => {
         const nextMessages = { ...state.messages, [chatId]: [welcomeMsg] };

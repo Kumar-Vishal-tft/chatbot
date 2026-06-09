@@ -243,48 +243,72 @@ export const syncConversationWithBackend = async (
   const msgs = messages[messageLookupKey] || [];
   if (msgs.length === 0) return;
 
-  // Construct user-agent conversation pairs sequentially
-  const chatPairs: { user: string; agent: string }[] = [];
-  for (let i = 0; i < msgs.length; i++) {
-    if (msgs[i].sender === 'user') {
-      const userContent = msgs[i].content;
-      // Find subsequent assistant reply
-      let agentContent = '';
-      for (let j = i + 1; j < msgs.length; j++) {
-        if (msgs[j].sender === 'assistant') {
-          agentContent = msgs[j].content;
-          break;
-        }
-      }
-      chatPairs.push({
-        user: userContent,
-        agent: agentContent,
-      });
-    }
-  }
+  // Extract user ID
+  const rawPersona = storeState.persona;
+  const userId = rawPersona?._meta?.mongo_patient_id || rawPersona?.identity?.patient_id || storeState.sessionId || 'guest';
 
-  // Existing Patient: Use the standard chat sync endpoint
-  const payload = {
-    session_id: sessionUUID,
-    time: Math.floor(Date.now() / 1000), // Epoch format in seconds
-    chat: chatPairs,
+  // Get enqueued messages tracker from localStorage
+  const getEnqueuedMessageIds = (): Set<string> => {
+    try {
+      const stored = localStorage.getItem('yhealth_enqueued_message_ids');
+      return stored ? new Set(JSON.parse(stored)) : new Set();
+    } catch {
+      return new Set();
+    }
   };
 
-  try {
-    const res = await fetch('/api/chat/sync-messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
-    if (res.ok) {
-      console.log('Successfully synced chat conversation to backend:', await res.json());
-    } else {
-      console.warn('Backend sync failed:', res.status, await res.text());
+  const markMessageAsEnqueued = (msgId: string) => {
+    try {
+      const ids = getEnqueuedMessageIds();
+      ids.add(msgId);
+      localStorage.setItem('yhealth_enqueued_message_ids', JSON.stringify(Array.from(ids)));
+    } catch (err) {
+      console.error(err);
     }
-  } catch (err) {
-    console.warn('Failed to sync conversation to backend:', err);
+  };
+
+  const enqueuedIds = getEnqueuedMessageIds();
+  const fifteenMinutesAgo = Date.now() - 15 * 60 * 1000;
+  const pendingMsgs = msgs.filter((m) => {
+    // Only enqueue messages that were created within the last 15 minutes of active session
+    if (!m.created_at || m.created_at < fifteenMinutesAgo) {
+      return false;
+    }
+    return !enqueuedIds.has(m.id);
+  });
+  
+  // Do not enqueue streaming/typing assistant response until it finishes
+  const filteredPending = pendingMsgs.filter((m) => m.id !== storeState.streamingMessageId);
+
+  for (const msg of filteredPending) {
+    if (!msg.content || msg.content.trim() === '...') continue;
+
+    const payload = {
+      user_id: userId,
+      session_id: sessionUUID,
+      role: msg.sender, // 'user' or 'assistant'
+      message: msg.content,
+      timestamp: Math.floor((msg.created_at || Date.now()) / 1000),
+    };
+
+    try {
+      const res = await fetch('/api/chat/enqueue', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        console.log(`Successfully enqueued message ${msg.id} to Redis`);
+        markMessageAsEnqueued(msg.id);
+      } else {
+        console.warn(`Failed to enqueue message ${msg.id}:`, res.status, await res.text());
+      }
+    } catch (err) {
+      console.warn(`Error enqueuing message ${msg.id}:`, err);
+    }
   }
 };
 

@@ -5,6 +5,7 @@ export interface Message {
   sender: 'user' | 'assistant';
   content: string;
   timestamp: string;
+  created_at?: number;
 }
 
 export interface ChatSession {

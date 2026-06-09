@@ -85,14 +85,14 @@ export async function getOrCreateGeminiCache(systemInstruction: string, model: s
     const data = await response.json();
     if (data && data.name) {
       console.log('Gemini context cache created successfully:', data.name);
-      
+
       // Store in local memory registry. Set expiration to 1 hour (minus 15 seconds buffer)
       geminiCacheRegistry[hash] = {
         cacheName: data.name,
         expiresAt: Date.now() + 3600 * 1000 - 15000,
         contextHash: hash
       };
-      
+
       return data.name;
     }
   } catch (err) {
@@ -159,17 +159,24 @@ export async function fetchGeminiResponse(
   history: Message[],
   profile?: OnboardingProfile
 ): Promise<string> {
-  // Check if we have an active patient persona loaded
-  const hasPersona = !!activePersonaManager.getRawPersona();
+  // Retrieve the patient type status from Zustand store
+  let isExistingPatient = false;
+  try {
+    const { useChatStore } = require('./chatStore');
+    isExistingPatient = useChatStore.getState().isExistingPatient;
+  } catch (e) { }
+
+  // Check if we have an active patient persona loaded AND the user is an existing patient
+  const hasPersona = !!activePersonaManager.getRawPersona() && isExistingPatient;
   const clinicalContextBlock = hasPersona ? PersonaContextBuilder.buildContext(prompt, activePersonaManager) : "";
 
   // Resolve active campaign role focusing prompt
   const utmCampaign = typeof window !== 'undefined' ? sessionStorage.getItem('utm_campaign') || 'default' : 'default';
-  
+
   // Try to load the predefined campaign persona from backend API, fallback to offline prompt if unavailable
   let campaignFocusPrompt = "";
   const backendPersonaPrompt = await fetchPredefinedPersona(utmCampaign);
-  
+
   if (backendPersonaPrompt) {
     campaignFocusPrompt = backendPersonaPrompt;
   } else {
@@ -194,26 +201,25 @@ You must always structure your health guidance beautifully using standard GitHub
 - Pay close attention to the conversation history. Always remember the context, previous questions, and answers from the last 5 turns of conversation to provide seamless, context-aware continuity.
 - Never use any emojis in your response. Keep the text clean.
 
-${
-  hasPersona
-    ? `### ACTIVE PATIENT CLINICAL HISTORY & ROUTED CONTEXT:
+${hasPersona
+      ? `### ACTIVE PATIENT CLINICAL HISTORY & ROUTED CONTEXT:
 ${clinicalContextBlock}
 
 CRITICAL RULES FOR RESPONDING:
 1. You MUST maintain standard Indian professional medical conversational decorum.
 2. The user has history of Gestational Diabetes and potential primary hypothyroidism. Suggest consulting Samarth Gupta (Endocrinologist) when relevant.
-3. Be supportive and acknowledge their efforts, emphasizing low-glycemic eating and stress reduction.`
-    : `User profile:
-${
-  profile
-    ? `- Name: ${profile.name || 'there'}
+3. Be supportive and acknowledge their efforts, emphasizing low-glycemic eating and stress reduction.
+4. If the user's query is asking for extended patient details, previous/historical records, past logs, or older medical reports that are NOT present in the active patient clinical history & context block above, you MUST output exactly \`[FALLBACK_TO_MONGO]\` as your entire response. Do NOT output anything else. If the query can be answered using the basic patient summary and current details already provided in the context block above, or if it is a general health question, answer it directly.`
+      : `User profile:
+${profile
+        ? `- Name: ${profile.name || 'there'}
 - Age: ${profile.age || 'not shared'}
 - Gender: ${profile.gender || 'not shared'}
 - Health Goal: ${profile.health_goal || 'general wellness'}
 - Conditions: ${profile.conditions && profile.conditions.length > 0 ? profile.conditions.join(', ') : 'none mentioned'}`
-    : 'No profile yet'
-}`
-}
+        : 'No profile yet'
+      }`
+    }
 
 Remember: Be warm, clear, and genuinely helpful. Always recommend seeing a doctor for diagnosis, but do so naturally — never in a defensive or robotic way. NEVER use any emojis in your output.`;
 
@@ -229,7 +235,7 @@ Remember: Be warm, clear, and genuinely helpful. Always recommend seeing a docto
 
   try {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-    
+
     const requestBody: any = {
       contents: mappedHistory,
       generationConfig: { temperature: 0.85, maxOutputTokens: 1024 },
@@ -256,14 +262,114 @@ Remember: Be warm, clear, and genuinely helpful. Always recommend seeing a docto
     const data = await response.json();
     const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (replyText) {
-      const trimmed = replyText.trim();
+      let trimmed = replyText.trim();
+
+      if (trimmed.includes('[FALLBACK_TO_MONGO]') && hasPersona) {
+        const rawPersona = activePersonaManager.getRawPersona();
+        const userId = rawPersona?._meta?.mongo_patient_id || rawPersona?.identity?.patient_id;
+
+        if (userId) {
+          console.log(`LLM requested fallback. Querying MongoDB for user ${userId} and query: "${prompt}"`);
+          try {
+            const agentRes = await fetch('/api/agent/query', {
+              method: 'POST',
+              headers: {
+                'accept': 'application/json',
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                user_id: userId,
+                query: prompt,
+              }),
+            });
+
+            if (agentRes.ok) {
+              const agentData = await agentRes.json();
+              console.log('Successfully retrieved MongoDB details:', agentData);
+
+              if (agentData && (agentData.answer || agentData.analytics)) {
+                const fallbackContext = `
+[DATABASE RETRIEVAL SUCCESSFUL]
+The following details were retrieved from the MongoDB patient record:
+- Summarized DB Answer: ${agentData.answer || 'No direct summary'}
+- Raw Patient DB Details (Analytics/Collections): ${JSON.stringify(agentData.analytics || {})}
+
+Please formulate a warm, helpful, clear, and beautifully structured clinical response to the user's query: "${prompt}".
+Use standard Markdown formatting (lists, bolding, headers, tables, strategic alerts like > [!NOTE], no emojis, etc.) and end with exactly 3 personalized [FollowUps: ...] chips. Do not mention that this data came from a database query/fallback unless necessary, just present it naturally as the clinical status of the patient.
+`;
+
+                const finalInstruction = systemInstruction.replace(
+                  '### ACTIVE PATIENT CLINICAL HISTORY & ROUTED CONTEXT:',
+                  `### ACTIVE PATIENT CLINICAL HISTORY & ROUTED CONTEXT:\n${fallbackContext}`
+                );
+
+                const finalRequestBody = {
+                  contents: [
+                    ...mappedHistory.slice(0, -1),
+                    { role: 'user', parts: [{ text: prompt }] },
+                    { role: 'model', parts: [{ text: '[Requesting clinical data fallback...]' }] },
+                    { role: 'user', parts: [{ text: `Here is the clinical data: ${JSON.stringify(agentData)}` }] }
+                  ],
+                  generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+                  systemInstruction: { parts: [{ text: finalInstruction }] }
+                };
+
+                const finalResponse = await fetch(url, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(finalRequestBody),
+                });
+
+                if (finalResponse.ok) {
+                  const finalData = await finalResponse.json();
+                  const finalReplyText = finalData?.candidates?.[0]?.content?.parts?.[0]?.text;
+                  if (finalReplyText) {
+                    trimmed = finalReplyText.trim();
+                    console.log('Formatted fallback response generated successfully:', trimmed);
+                  }
+                }
+              }
+            }
+          } catch (err) {
+            console.warn('Fallback MongoDB query or secondary Gemini format failed, using retry:', err);
+          }
+        }
+
+        // If secondary generation or agent call failed and trimmed is still fallback token, retry with fallback rule stripped
+        if (trimmed.includes('[FALLBACK_TO_MONGO]')) {
+          const fallbackInstruction = systemInstruction.replace(
+            /4\.\s*If the user's query is asking for[\s\S]*?answer it directly\./i,
+            ''
+          );
+          try {
+            const retryResponse = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: mappedHistory,
+                generationConfig: { temperature: 0.8, maxOutputTokens: 1024 },
+                systemInstruction: { parts: [{ text: fallbackInstruction }] }
+              }),
+            });
+            if (retryResponse.ok) {
+              const retryData = await retryResponse.json();
+              const retryReply = retryData.candidates?.[0]?.content?.parts?.[0]?.text;
+              if (retryReply) {
+                trimmed = retryReply.trim();
+              }
+            }
+          } catch (err) {
+            console.warn('Direct fallback retry failed:', err);
+          }
+        }
+      }
 
       // Asynchronously trigger Langfuse tracing (non-blocking)
       let activeChatId = undefined;
       try {
         const { useChatStore } = require('./chatStore');
         activeChatId = useChatStore.getState().activeChatId;
-      } catch (e) {}
+      } catch (e) { }
 
       fetch('/api/trace', {
         method: 'POST',
@@ -356,7 +462,7 @@ Strict rules:
 
   try {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-    
+
     const requestBody: any = {
       contents: mappedHistory,
       generationConfig: { temperature: 0.9, maxOutputTokens: 1024 },
@@ -386,7 +492,7 @@ Strict rules:
       try {
         const { useChatStore } = require('./chatStore');
         activeChatId = useChatStore.getState().activeChatId;
-      } catch (e) {}
+      } catch (e) { }
 
       fetch('/api/trace', {
         method: 'POST',
@@ -486,7 +592,7 @@ Do not include any other text or markdown formatting outside the JSON block.`;
       try {
         const { useChatStore } = require('./chatStore');
         activeChatId = useChatStore.getState().activeChatId;
-      } catch (e) {}
+      } catch (e) { }
 
       fetch('/api/trace', {
         method: 'POST',
