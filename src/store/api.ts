@@ -685,7 +685,8 @@ export async function verifyUserData(
 }
 
 export async function extractOnboardingEntities(
-  content: string
+  content: string,
+  currentStep?: string
 ): Promise<{
   name?: string;
   age?: string;
@@ -699,6 +700,9 @@ export async function extractOnboardingEntities(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 3000);
 
+  let res: any = {};
+  let errors: Record<string, string> = {};
+
   try {
     const response = await fetch('/api/extract', {
       method: 'POST',
@@ -711,8 +715,6 @@ export async function extractOnboardingEntities(
     if (response.ok) {
       const data = await response.json();
       if (data.success && data.extracted) {
-        const res: any = {};
-        const errors: Record<string, string> = {};
         const ext = data.extracted;
 
         if (ext.name?.valid && ext.name.value) res.name = ext.name.value;
@@ -735,9 +737,6 @@ export async function extractOnboardingEntities(
 
         if (ext.feeling_note?.valid && ext.feeling_note.value) res.feeling_note = ext.feeling_note.value;
         else if (ext.feeling_note?.reason) errors.feeling_note = ext.feeling_note.reason;
-
-        if (Object.keys(errors).length > 0) res.errors = errors;
-        return res;
       }
     }
   } catch (err) {
@@ -746,45 +745,106 @@ export async function extractOnboardingEntities(
     clearTimeout(timeoutId);
   }
 
-  // Client fallback regex parsing
-  const res: any = {};
-  const lower = content.toLowerCase();
+  // If API succeeded but didn't extract values for the current active step (e.g. because of single-word answer like "None" or "Good"),
+  // run the context-aware fallback logic to retrieve the entity.
+  const lower = content.toLowerCase().trim();
 
-  // 1. Phone number (10-15 digits, starting with optional +)
-  const phoneMatch = content.replace(/[-\s]/g, '').match(/\+?\d{10,15}/);
-  if (phoneMatch) {
-    const p = phoneMatch[0];
-    if (p.startsWith('+') || (p.length === 10 && /^[6-9]/.test(p))) {
-      res.phone_number = p;
+  // 1. Context-aware/Fallback: Name
+  if (!res.name && (!currentStep || currentStep === 'asked_name')) {
+    const nameMatch = content.match(/\b(?:i am|i'm|name is|call me|myself)\s+([A-Za-z]{2,15})\b/i);
+    if (nameMatch && nameMatch[1]) {
+      const nameVal = nameMatch[1].trim();
+      if (!/^(male|female|guy|man|girl|woman|skip|none|diabetes|hypertension)$/i.test(nameVal)) {
+        res.name = nameVal.charAt(0).toUpperCase() + nameVal.slice(1).toLowerCase();
+      }
+    } else {
+      const firstWord = content.trim().split(/[\s,]+/)[0];
+      const isWordGreeting = isGreetingOrFiller(firstWord);
+      const hasLetters = /^[A-Za-z]{2,15}$/.test(firstWord);
+      const isCommonKeyword = /^(male|female|skip|none|diabetes|hypertension|my|i|im|am)$/i.test(firstWord);
+      if (hasLetters && !isWordGreeting && !isCommonKeyword) {
+        res.name = firstWord.charAt(0).toUpperCase() + firstWord.slice(1).toLowerCase();
+      }
     }
   }
 
-  // 2. Age (integer between 5 and 110, reject decimals/fractions/points)
-  // Check only 1-3 digit numbers to prevent matching a 10-digit phone number as age
-  const ageMatches = content.match(/\b\d{1,3}\b/g);
-  if (ageMatches && !lower.includes('.') && !lower.includes('point') && !lower.includes('half')) {
-    for (const match of ageMatches) {
-      const ageVal = parseInt(match, 10);
-      if (ageVal >= 5 && ageVal <= 110) {
-        res.age = ageVal.toString();
+  // 2. Context-aware/Fallback: Age
+  if (!res.age && (!currentStep || currentStep === 'asked_age')) {
+    const ageMatches = content.match(/\b\d{1,3}\b/g);
+    if (ageMatches && !lower.includes('.') && !lower.includes('point') && !lower.includes('half')) {
+      for (const match of ageMatches) {
+        const ageVal = parseInt(match, 10);
+        if (ageVal >= 5 && ageVal <= 110) {
+          res.age = ageVal.toString();
+          break;
+        }
+      }
+    }
+  }
+
+  // 3. Context-aware/Fallback: Gender
+  if (!res.gender && (!currentStep || currentStep === 'asked_gender')) {
+    if (/\b(male|boy|man|guy)\b/.test(lower)) res.gender = 'Male';
+    else if (/\b(female|girl|woman|lady)\b/.test(lower)) res.gender = 'Female';
+    else if (/\b(prefer not|rather not|skip|none)\b/.test(lower)) res.gender = 'Prefer not to say';
+  }
+
+  // 4. Context-aware/Fallback: Phone Number
+  if (!res.phone_number && (!currentStep || currentStep === 'asked_phone')) {
+    const phoneMatch = content.replace(/[-\s]/g, '').match(/\+?\d{10,15}/);
+    if (phoneMatch) {
+      const p = phoneMatch[0];
+      if (p.startsWith('+') || (p.length === 10 && /^[6-9]/.test(p))) {
+        res.phone_number = p;
+      }
+    }
+  }
+
+  // 5. Context-aware/Fallback: Health Goal
+  if (!res.health_goal && (!currentStep || currentStep === 'asked_goal')) {
+    const goalsList = [
+      'Weight loss', 'Diabetes', 'Blood reports', 'Nutrition', 'Fitness', 
+      'General wellness', 'Hypertension', 'GLP-1', 'Metabolic', 
+      'Sexual Wellness', 'Mental Wellness', 'Longevity'
+    ];
+    for (const goal of goalsList) {
+      if (lower.includes(goal.toLowerCase())) {
+        res.health_goal = goal;
         break;
       }
     }
   }
 
-  // 3. Gender
-  if (/\b(male|boy|man|guy)\b/.test(lower)) res.gender = 'Male';
-  else if (/\b(female|girl|woman|lady)\b/.test(lower)) res.gender = 'Female';
-  else if (/\b(prefer not|rather not|skip)\b/.test(lower)) res.gender = 'Prefer not to say';
-
-  // 4. Name extraction from patterns like "I am X", "name is X", "call me X"
-  const nameMatch = content.match(/\b(?:i am|i'm|name is|call me|myself)\s+([A-Za-z]{2,15})\b/i);
-  if (nameMatch && nameMatch[1]) {
-    const nameVal = nameMatch[1].trim();
-    if (!/^(male|female|guy|man|girl|woman|skip|none|diabetes|hypertension)$/i.test(nameVal)) {
-      res.name = nameVal.charAt(0).toUpperCase() + nameVal.slice(1).toLowerCase();
+  // 6. Context-aware/Fallback: Conditions
+  if ((!res.conditions || res.conditions.length === 0) && (!currentStep || currentStep === 'asked_conditions')) {
+    const conditionsList = [
+      'Diabetes', 'Hypertension', 'Asthma', 'Obesity', 'Metabolic health'
+    ];
+    const matched: string[] = [];
+    for (const cond of conditionsList) {
+      if (lower.includes(cond.toLowerCase())) {
+        matched.push(cond);
+      }
+    }
+    if (matched.length > 0) {
+      res.conditions = matched;
+    } else if (
+      lower === 'none' || lower === 'no' || lower === 'nothing' || 
+      lower === 'nil' || lower === 'n/a' || lower.includes('no conditions') || 
+      lower.includes('dont have') || lower.includes("don't have")
+    ) {
+      res.conditions = ['None'];
     }
   }
 
+  // 7. Context-aware/Fallback: Feeling Note
+  if (!res.feeling_note && (!currentStep || currentStep === 'asked_feeling')) {
+    const isWordGreeting = isGreetingOrFiller(content);
+    if (!isWordGreeting && content.trim().length > 0) {
+      res.feeling_note = content.trim();
+    }
+  }
+
+  if (Object.keys(errors).length > 0) res.errors = errors;
   return res;
 }

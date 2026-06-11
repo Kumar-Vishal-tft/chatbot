@@ -368,7 +368,7 @@ export const getNextOnboardingStep = (profile: OnboardingProfile): OnboardingSte
   if (!profile.gender) return 'asked_gender';
   if (!profile.phone_number) return 'asked_phone';
   if (!profile.health_goal) return 'asked_goal';
-  if (!profile.conditions) return 'asked_conditions';
+  if (!profile.conditions || profile.conditions.length === 0) return 'asked_conditions';
   if (!profile.feeling_note) return 'asked_feeling';
   return 'completed';
 };

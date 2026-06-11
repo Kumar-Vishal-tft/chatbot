@@ -334,7 +334,7 @@ Could you rephrase that? Try something like:
 
       // ── 2. Onboarding Processing ──
       else if (!isVerified && onboardingStep !== 'completed') {
-        const extracted = await extractOnboardingEntities(content);
+        const extracted = await extractOnboardingEntities(content, onboardingStep);
         
         let anyNewExtraction = false;
         if (extracted.name && extracted.name !== onboardingProfile.name) {
@@ -430,7 +430,9 @@ Could you rephrase that? Try something like:
           let activeQuestion = '';
           const activeStep = onboardingStep === 'not_started' ? 'asked_name' : onboardingStep;
           if (activeStep === 'asked_name') {
-            activeQuestion = `**What should I call you?**`;
+            if (!isFirstTime) {
+              activeQuestion = `**What should I call you?**`;
+            }
           } else if (activeStep === 'asked_age') {
             activeQuestion = `**How old are you?** *(This helps me give you better guidance)*`;
           } else if (activeStep === 'asked_gender') {
@@ -491,17 +493,17 @@ Could you rephrase that? Try something like:
           nextBotMessageType = nextStep === 'completed' ? 'onboarding_complete' : 'onboarding_question';
           
           // Generate message based on progression
+          const greetingPrefix = (!onboardingProfile.name && nextProfile.name) ? `Nice to meet you, **${nextProfile.name}**! Welcome to YHealth — your personal clinical intelligence assistant.\n\n` : '';
+          
           if (nextStep === 'asked_name') {
             matchedResponse = `**What should I call you?**`;
           } else if (nextStep === 'asked_age') {
-            const greetingPrefix = onboardingStep === 'not_started' ? `Nice to meet you, **${nextProfile.name}**! Welcome to YHealth — your personal clinical intelligence assistant.\n\n` : '';
             matchedResponse = `${greetingPrefix}**How old are you?** *(This helps me give you better guidance)*`;
           } else if (nextStep === 'asked_gender') {
-            matchedResponse = `Got it.\n\n**What's your gender?**\n\n[FollowUps: Male | Female | Prefer not to say]`;
+            matchedResponse = `${greetingPrefix}Got it.\n\n**What's your gender?**\n\n[FollowUps: Male | Female | Prefer not to say]`;
           } else if (nextStep === 'asked_phone') {
-            matchedResponse = `Thanks! **What is your mobile/phone number?** *(This helps me save your secure progress)*`;
+            matchedResponse = `${greetingPrefix}Thanks! **What is your mobile/phone number?** *(This helps me save your secure progress)*`;
           } else if (nextStep === 'asked_goal') {
-            const greetingPrefix = onboardingStep === 'not_started' ? `Nice to meet you, **${nextProfile.name}**! Welcome to YHealth — your personal clinical intelligence assistant.\n\n` : '';
             matchedResponse = `${greetingPrefix}**What would you most like help with?**\n\n[FollowUps: Weight loss | Diabetes | Blood reports | Nutrition | Fitness | General wellness | Hypertension | GLP-1 | Metabolic | Sexual Wellness | Mental Wellness | Longevity]`;
           } else if (nextStep === 'asked_conditions') {
             matchedResponse = `Noted!\n\n**Do you have any existing medical conditions?** *(Type them out, or choose below)*\n\n[FollowUps: None | Diabetes | Hypertension | Asthma | Obesity | Metabolic health]`;
