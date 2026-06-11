@@ -540,7 +540,7 @@ export async function verifyUserData(
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 3000);
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
 
   try {
     const response = await fetch('/api/validate', {
@@ -698,7 +698,7 @@ export async function extractOnboardingEntities(
   errors?: Record<string, string>;
 }> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 3000);
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
 
   let res: any = {};
   let errors: Record<string, string> = {};

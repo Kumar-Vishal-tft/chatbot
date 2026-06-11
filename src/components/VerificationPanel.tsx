@@ -158,14 +158,6 @@ export default function VerificationPanel({ onVerified, onClose }: VerificationP
           throw errorObj;
         }
 
-        // Enforce that only the registered patient mobile number is allowed to proceed
-        const cleanPhone = phone.replace(/\D/g, '');
-        if (!cleanPhone.endsWith('8777846383')) {
-          const errorObj = new Error("We couldn't find a health profile linked to this mobile number.");
-          (errorObj as any).status = 404;
-          throw errorObj;
-        }
-
         return res.json();
       })
       .then(() => {
@@ -178,14 +170,9 @@ export default function VerificationPanel({ onVerified, onClose }: VerificationP
           setPhoneError(err.message || "We couldn't find a health profile linked to this mobile number.");
         } else {
           // Connection refused / server completely offline
-          const isMockNumber = phone.replace(/\D/g, '').endsWith('8777846383');
-          if (isMockNumber) {
-            console.warn('Failed to send OTP to backend. Proceeding to OTP step for offline/fallback mode.', err);
-            captureAnalyticsEvent('otp_sent');
-            setStep('otp');
-          } else {
-            setPhoneError("We couldn't find a health profile linked to this mobile number.");
-          }
+          console.warn('Failed to send OTP to backend. Proceeding to OTP step for offline/fallback mode.', err);
+          captureAnalyticsEvent('otp_sent');
+          setStep('otp');
         }
       })
       .finally(() => {
@@ -345,10 +332,6 @@ export default function VerificationPanel({ onVerified, onClose }: VerificationP
     })
       .then(res => {
         if (!res.ok) throw new Error('Failed to send OTP');
-        const cleanPhone = phone.replace(/\D/g, '');
-        if (!cleanPhone.endsWith('8777846383')) {
-          throw new Error("We couldn't find a health profile linked to this mobile number.");
-        }
         return res.json();
       })
       .catch(err => {
