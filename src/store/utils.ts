@@ -1,6 +1,6 @@
 // ─── Pure Utility / Helper Functions ──────────────────────────────────────
 
-import { ChatSession, Message } from './types';
+import { ChatSession, Message, OnboardingProfile, OnboardingStep } from './types';
 
 // ── localStorage persistence ───────────────────────────────────────────────
 
@@ -48,6 +48,10 @@ export const syncSessionWithRedis = async (
         sessionId,
         sessions,
         messages,
+        onboardingStep: storeState.onboardingStep,
+        onboardingProfile: storeState.onboardingProfile,
+        userName: storeState.userName,
+        isVerified: storeState.isVerified,
       }),
     });
   } catch (err) {
@@ -354,4 +358,18 @@ export function generateUUIDv7(): string {
     randomHex.slice(8, 20)
   ].join('-');
 }
+
+/**
+ * Determines the next unanswered onboarding step based on the provided profile.
+ */
+export const getNextOnboardingStep = (profile: OnboardingProfile): OnboardingStep => {
+  if (!profile.name) return 'asked_name';
+  if (!profile.age) return 'asked_age';
+  if (!profile.gender) return 'asked_gender';
+  if (!profile.phone_number) return 'asked_phone';
+  if (!profile.health_goal) return 'asked_goal';
+  if (!profile.conditions) return 'asked_conditions';
+  if (!profile.feeling_note) return 'asked_feeling';
+  return 'completed';
+};
 

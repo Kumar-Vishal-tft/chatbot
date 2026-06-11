@@ -257,12 +257,17 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
               }
             </span>
           </div>
-          <button 
-            onClick={() => useChatStore.setState({ onboardingStep: 'completed', isVerified: true })}
-            className="text-[10px] font-extrabold text-neutral-400 dark:text-neutral-500 hover:text-black dark:hover:text-white uppercase transition cursor-pointer"
-          >
-            Skip personalizing
-          </button>
+          {onboardingStep !== 'asked_name' &&
+           onboardingStep !== 'asked_age' &&
+           onboardingStep !== 'asked_gender' &&
+           onboardingStep !== 'asked_phone' && (
+            <button 
+              onClick={() => useChatStore.getState().skipOnboarding()}
+              className="text-[10px] font-extrabold text-neutral-400 dark:text-neutral-500 hover:text-black dark:hover:text-white uppercase transition cursor-pointer"
+            >
+              Skip personalizing
+            </button>
+          )}
         </div>
       )}
 

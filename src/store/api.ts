@@ -167,7 +167,7 @@ export async function fetchGeminiResponse(
 
   // Resolve dynamic active patient profile values
   const rawPersona = hasPersona ? activePersonaManager.getRawPersona() : null;
-  const doctorName = rawPersona?.care_team?.assigned_doctor?.name 
+  const doctorName = rawPersona?.care_team?.assigned_doctor?.name
     ? `Dr. ${rawPersona.care_team.assigned_doctor.name.replace(/^(dr\.\s*)/i, '')}`
     : 'their assigned doctor';
   const doctorSpecialization = rawPersona?.care_team?.assigned_doctor?.specialization || 'Clinical Lead';
@@ -524,7 +524,7 @@ Strict rules:
 // ── Onboarding Field Validator (LLM-powered) ───────────────────────────────
 
 export async function verifyUserData(
-  step: Extract<OnboardingStep, 'asked_name' | 'asked_age'>,
+  step: OnboardingStep,
   content: string
 ): Promise<{ isValid: boolean; parsedValue: string; isQuestionOrQuery?: boolean; errorMessage?: string }> {
   if (step === 'asked_name') {
@@ -539,114 +539,252 @@ export async function verifyUserData(
     }
   }
 
-  let systemInstruction = '';
-
-  if (step === 'asked_name') {
-    systemInstruction = `You are a strict clinical profile validator.
-Analyze the user's input to see if they provided a valid first name or preferred name, or if they asked a health-related question/general medical inquiry instead of answering the name prompt.
-Rules:
-1. If the user asked a question (e.g. "how can you help me", "what are tension headache symptoms?"), is a command, is a conversational phrase, contains health terms, or is a general query, mark isValid: false and set "isQuestionOrQuery": true.
-2. If they provided a real name (e.g. "Alex", "Sarah", "John Smith"), extract the clean name ("Alex", "Sarah"), set isValid: true, and set "isQuestionOrQuery": false.
-3. Your output must be a clean JSON object in this exact format:
-{
-  "isValid": true or false,
-  "parsedValue": "extracted clean capitalized name",
-  "isQuestionOrQuery": true or false,
-  "reason": "short explanation if invalid"
-}
-Do not include any other text or markdown formatting outside the JSON block.`;
-  } else if (step === 'asked_age') {
-    systemInstruction = `You are a strict clinical profile validator.
-Analyze the user's input to see if they provided a valid age (a human age between 1 and 120), or if they asked a health-related question/general medical inquiry instead of answering the age prompt.
-Rules:
-1. If they specified a number or phrase containing an age (e.g. "I'm 28", "28 years old", "twenty eight"), extract it as a number string ("28"), set isValid: true, and set "isQuestionOrQuery": false.
-2. If the user asked a question (e.g. "how can you help me", "what are tension headache symptoms?"), is a command, is conversational, or physical impossible age, mark isValid: false and set "isQuestionOrQuery": true.
-3. Your output must be a clean JSON object in this exact format:
-{
-  "isValid": true or false,
-  "parsedValue": "extracted age number string",
-  "isQuestionOrQuery": true or false,
-  "reason": "short explanation if invalid"
-}
-Do not include any other text or markdown formatting outside the JSON block.`;
-  }
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 3000);
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-    const response = await fetch(url, {
+    const response = await fetch('/api/validate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: content }] }],
-        systemInstruction: { parts: [{ text: systemInstruction }] },
-        generationConfig: { temperature: 0.1, responseMimeType: 'application/json', maxOutputTokens: 256 },
-      }),
+      body: JSON.stringify({ step, value: content }),
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
 
-    if (!response.ok) throw new Error('Validation request failed');
+    if (!response.ok) {
+      throw new Error(`Validation response status: ${response.status}`);
+    }
 
     const data = await response.json();
-    const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    return {
+      isValid: data.valid === true,
+      parsedValue: data.normalized || '',
+      isQuestionOrQuery: data.reason === 'health_question',
+      errorMessage: data.reason && data.reason !== 'health_question' ? data.reason : undefined
+    };
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    console.warn('LLM User validation failed or timed out, fallback to basic heuristics:', error);
 
-    if (replyText) {
-      // Asynchronously trigger Langfuse tracing (non-blocking)
-      let activeChatId = undefined;
-      try {
-        const { useChatStore } = require('./chatStore');
-        activeChatId = useChatStore.getState().activeChatId;
-      } catch (e) { }
+    const trimmed = content.trim();
+    const normalizedStep = step.toLowerCase().replace('asked_', '');
 
-      fetch('/api/trace', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: `validation-${step}`,
-          input: content,
-          output: replyText,
-          model: 'gemini-2.5-flash',
-          userId: 'anonymous',
-          sessionId: activeChatId || undefined,
-          usageMetadata: data.usageMetadata
-        })
-      }).catch(err => console.warn('Langfuse tracing proxy failed:', err));
+    const containsQuestionWord = /\b(how|what|who|why|where|when|can|you|please|help|greet|tell|symptom|treat|prevent|cure|medicine|clinical)\b/i.test(trimmed);
+    const isSentence = containsQuestionWord || trimmed.includes('?');
 
-      const cleaned = replyText.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
-      const parsed = JSON.parse(cleaned);
-      const parsedVal = String(parsed.parsedValue || '').trim();
-      const isSentence =
-        parsedVal.split(/\s+/).length > 3 ||
-        parsedVal.includes('?') ||
-        /\b(how|what|who|why|where|when|can|you|please|help|greet|tell|symptom|treat|prevent|cure|medicine|clinical)\b/i.test(parsedVal);
+    if (normalizedStep === 'name') {
+      const words = trimmed.split(/\s+/);
+      const hasLetters = /[a-zA-Z]/.test(trimmed);
+      const isBad = trimmed.length < 2 || trimmed.length > 30 || /\d/.test(trimmed) || hasProfanity(trimmed) || (words.length > 3 || isSentence) || !hasLetters;
+      const capitalized = trimmed.split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      return { isValid: !isBad, parsedValue: capitalized, isQuestionOrQuery: isSentence };
+    }
+
+    if (normalizedStep === 'age') {
+      const isDecimal = /\./.test(trimmed) || /\b(half|point)\b/i.test(trimmed);
+      const num = parseInt(trimmed.match(/\d+/)?.[0] || '', 10);
+      const isGood = !isNaN(num) && num >= 5 && num <= 110 && !isSentence && !isDecimal;
+      return { isValid: isGood, parsedValue: isGood ? num.toString() : '', isQuestionOrQuery: isSentence };
+    }
+
+    if (normalizedStep === 'gender') {
+      const lower = trimmed.toLowerCase();
+      let parsed = '';
+      if (lower === 'male' || lower === 'm') parsed = 'Male';
+      else if (lower === 'female' || lower === 'f') parsed = 'Female';
+      else if (lower.includes('not to say') || lower.includes('prefer') || lower === 'skip') parsed = 'Prefer not to say';
 
       return {
-        isValid: parsed.isValid === true && !isSentence && parsedVal.length >= 2,
-        parsedValue: parsedVal,
-        isQuestionOrQuery: parsed.isQuestionOrQuery === true || isSentence,
-        errorMessage: String(parsed.reason || ''),
+        isValid: parsed !== '',
+        parsedValue: parsed,
+        isQuestionOrQuery: isSentence
       };
     }
 
-    throw new Error('No validation data returned');
-  } catch (error) {
-    console.error('LLM User validation failed, fallback to basic heuristics:', error);
+    if (normalizedStep === 'phone') {
+      const digits = trimmed.replace(/\D/g, '');
+      const startsWithPlus = trimmed.startsWith('+');
+      let isPhoneValid = false;
 
-    if (step === 'asked_name') {
-      const trimmed = content.trim();
-      const words = trimmed.split(/\s+/);
-      const containsQuestionWord =
-        /\b(how|what|who|why|where|when|can|you|please|help|greet|tell|symptom|treat|prevent|cure|medicine|clinical)\b/i.test(trimmed);
-      const isSentence = words.length > 3 || containsQuestionWord || trimmed.includes('?');
-      const isBad = trimmed.length < 2 || trimmed.length > 30 || /\d/.test(trimmed) || hasProfanity(trimmed) || isSentence;
-      const capitalized = trimmed.split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-      return { isValid: !isBad, parsedValue: capitalized, isQuestionOrQuery: isSentence };
-    } else {
-      const trimmed = content.trim();
-      const containsQuestionWord =
-        /\b(how|what|who|why|where|when|can|you|please|help|greet|tell|symptom|treat|prevent|cure|medicine|clinical)\b/i.test(trimmed);
-      const isSentence = containsQuestionWord || trimmed.includes('?');
-      const num = parseInt(content.match(/\d+/)?.[0] || '', 10);
-      const isGood = !isNaN(num) && num > 0 && num < 120 && !isSentence;
-      return { isValid: isGood, parsedValue: isGood ? num.toString() : '', isQuestionOrQuery: isSentence };
+      if (digits.length === 10) {
+        isPhoneValid = /^[6-9]\d{9}$/.test(digits);
+      } else if (digits.length === 11) {
+        isPhoneValid = /^0[6-9]\d{9}$/.test(digits);
+      } else if (digits.length === 12) {
+        isPhoneValid = /^91[6-9]\d{9}$/.test(digits);
+      } else if (startsWithPlus) {
+        isPhoneValid = digits.length >= 10 && digits.length <= 15;
+      }
+
+      return {
+        isValid: isPhoneValid && !isSentence,
+        parsedValue: isPhoneValid ? trimmed : '',
+        isQuestionOrQuery: isSentence
+      };
+    }
+
+    if (normalizedStep === 'goal') {
+      const VALID_GOALS = [
+        'Weight loss', 'Diabetes', 'Blood reports', 'Nutrition', 'Fitness', 'General wellness',
+        'Hypertension', 'GLP-1', 'Metabolic', 'Sexual Wellness', 'Mental Wellness', 'Longevity'
+      ];
+      const lower = trimmed.toLowerCase();
+      const matched = VALID_GOALS.filter(g => lower.includes(g.toLowerCase()));
+
+      if (matched.length === 0) {
+        if (lower.includes('diet') || lower.includes('food')) matched.push('Nutrition');
+        if (lower.includes('fat') || lower.includes('lose')) matched.push('Weight loss');
+        if (lower.includes('sugar')) matched.push('Diabetes');
+        if (lower.includes('exercise') || lower.includes('gym') || lower.includes('workout')) matched.push('Fitness');
+        if (lower.includes('bp') || lower.includes('pressure')) matched.push('Hypertension');
+      }
+
+      return {
+        isValid: matched.length > 0 && !isSentence,
+        parsedValue: matched.join(', '),
+        isQuestionOrQuery: isSentence
+      };
+    }
+
+    if (normalizedStep === 'conditions') {
+      const VALID_CONDITIONS = ['None', 'Diabetes', 'Hypertension', 'Asthma', 'Obesity', 'Metabolic health'];
+      const lower = trimmed.toLowerCase();
+
+      if (/\b(none|no|nothing|na|n\/a|nil)\b/i.test(lower)) {
+        return { isValid: true, parsedValue: 'None', isQuestionOrQuery: isSentence };
+      }
+
+      const matched = VALID_CONDITIONS.filter(c => lower.includes(c.toLowerCase()) && c !== 'None');
+      if (matched.length === 0) {
+        if (lower.includes('sugar')) matched.push('Diabetes');
+        if (lower.includes('bp') || lower.includes('pressure')) matched.push('Hypertension');
+        if (lower.includes('overweight') || lower.includes('obese')) matched.push('Obesity');
+      }
+
+      return {
+        isValid: matched.length > 0 && !isSentence,
+        parsedValue: matched.join(', '),
+        isQuestionOrQuery: isSentence
+      };
+    }
+
+    if (normalizedStep === 'feeling') {
+      const hasHtml = /<[^>]*>/g.test(trimmed);
+      const isGibberish = /(.)\1{5,}/.test(trimmed);
+      const isGood = trimmed.length >= 2 && trimmed.length <= 500 && !hasHtml && !isGibberish;
+
+      return {
+        isValid: isGood && !isSentence,
+        parsedValue: isGood ? trimmed : '',
+        isQuestionOrQuery: isSentence
+      };
+    }
+
+    return { isValid: false, parsedValue: '', isQuestionOrQuery: isSentence };
+  }
+}
+
+export async function extractOnboardingEntities(
+  content: string
+): Promise<{
+  name?: string;
+  age?: string;
+  gender?: string;
+  phone_number?: string;
+  health_goal?: string;
+  conditions?: string[];
+  feeling_note?: string;
+  errors?: Record<string, string>;
+}> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+  try {
+    const response = await fetch('/api/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: content }),
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.success && data.extracted) {
+        const res: any = {};
+        const errors: Record<string, string> = {};
+        const ext = data.extracted;
+
+        if (ext.name?.valid && ext.name.value) res.name = ext.name.value;
+        else if (ext.name?.reason) errors.name = ext.name.reason;
+
+        if (ext.age?.valid && ext.age.value) res.age = ext.age.value;
+        else if (ext.age?.reason) errors.age = ext.age.reason;
+
+        if (ext.gender?.valid && ext.gender.value) res.gender = ext.gender.value;
+        else if (ext.gender?.reason) errors.gender = ext.gender.reason;
+
+        if (ext.phone_number?.valid && ext.phone_number.value) res.phone_number = ext.phone_number.value;
+        else if (ext.phone_number?.reason) errors.phone_number = ext.phone_number.reason;
+
+        if (ext.health_goal?.valid && ext.health_goal.value) res.health_goal = ext.health_goal.value;
+        else if (ext.health_goal?.reason) errors.health_goal = ext.health_goal.reason;
+
+        if (ext.conditions?.valid && ext.conditions.value) res.conditions = ext.conditions.value;
+        else if (ext.conditions?.reason) errors.conditions = ext.conditions.reason;
+
+        if (ext.feeling_note?.valid && ext.feeling_note.value) res.feeling_note = ext.feeling_note.value;
+        else if (ext.feeling_note?.reason) errors.feeling_note = ext.feeling_note.reason;
+
+        if (Object.keys(errors).length > 0) res.errors = errors;
+        return res;
+      }
+    }
+  } catch (err) {
+    console.warn('Extraction API failed, using client fallback', err);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  // Client fallback regex parsing
+  const res: any = {};
+  const lower = content.toLowerCase();
+
+  // 1. Phone number (10-15 digits, starting with optional +)
+  const phoneMatch = content.replace(/[-\s]/g, '').match(/\+?\d{10,15}/);
+  if (phoneMatch) {
+    const p = phoneMatch[0];
+    if (p.startsWith('+') || (p.length === 10 && /^[6-9]/.test(p))) {
+      res.phone_number = p;
     }
   }
+
+  // 2. Age (integer between 5 and 110, reject decimals/fractions/points)
+  // Check only 1-3 digit numbers to prevent matching a 10-digit phone number as age
+  const ageMatches = content.match(/\b\d{1,3}\b/g);
+  if (ageMatches && !lower.includes('.') && !lower.includes('point') && !lower.includes('half')) {
+    for (const match of ageMatches) {
+      const ageVal = parseInt(match, 10);
+      if (ageVal >= 5 && ageVal <= 110) {
+        res.age = ageVal.toString();
+        break;
+      }
+    }
+  }
+
+  // 3. Gender
+  if (/\b(male|boy|man|guy)\b/.test(lower)) res.gender = 'Male';
+  else if (/\b(female|girl|woman|lady)\b/.test(lower)) res.gender = 'Female';
+  else if (/\b(prefer not|rather not|skip)\b/.test(lower)) res.gender = 'Prefer not to say';
+
+  // 4. Name extraction from patterns like "I am X", "name is X", "call me X"
+  const nameMatch = content.match(/\b(?:i am|i'm|name is|call me|myself)\s+([A-Za-z]{2,15})\b/i);
+  if (nameMatch && nameMatch[1]) {
+    const nameVal = nameMatch[1].trim();
+    if (!/^(male|female|guy|man|girl|woman|skip|none|diabetes|hypertension)$/i.test(nameVal)) {
+      res.name = nameVal.charAt(0).toUpperCase() + nameVal.slice(1).toLowerCase();
+    }
+  }
+
+  return res;
 }

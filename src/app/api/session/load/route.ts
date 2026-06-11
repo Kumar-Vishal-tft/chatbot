@@ -21,12 +21,16 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const { sessions, messages } = JSON.parse(data);
+    const parsed = JSON.parse(data);
     return NextResponse.json({
       success: true,
       message: 'Session successfully retrieved from Redis',
-      sessions,
-      messages
+      sessions: parsed.sessions || [],
+      messages: parsed.messages || {},
+      onboardingStep: parsed.onboardingStep || 'not_started',
+      onboardingProfile: parsed.onboardingProfile || {},
+      userName: parsed.userName || '',
+      isVerified: parsed.isVerified || false
     });
   } catch (error: any) {
     console.error('Redis load session error:', error);

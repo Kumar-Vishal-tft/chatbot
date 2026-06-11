@@ -15,7 +15,7 @@ export interface LeadData {
 }
 
 interface LeadCaptureCardProps {
-  /** Called once all 3 fields are collected */
+  /** Called once Name and Phone are collected */
   onComplete: (data: LeadData) => void;
 }
 
@@ -27,43 +27,13 @@ const STEPS = [
     placeholder: 'Your name…',
     type: 'text',
     inputMode: 'text' as React.HTMLAttributes<HTMLInputElement>['inputMode'],
-    validate: (v: string) =>
-      v.trim().length >= 2 ? null : 'Please enter at least 2 characters.',
   },
   {
     key: 'phone' as const,
-    prompt: 'What\'s your mobile number?',
+    prompt: "What's your mobile number?",
     placeholder: '+91 98765 43210',
     type: 'tel',
     inputMode: 'tel' as React.HTMLAttributes<HTMLInputElement>['inputMode'],
-    validate: (v: string) => {
-      const digits = v.replace(/\D/g, '');
-      const startsWithPlus = v.trim().startsWith('+');
-      let isPhoneValid = false;
-
-      if (digits.length === 10) {
-        isPhoneValid = /^[6-9]\d{9}$/.test(digits);
-      } else if (digits.length === 11) {
-        isPhoneValid = /^0[6-9]\d{9}$/.test(digits);
-      } else if (digits.length === 12) {
-        isPhoneValid = /^91[6-9]\d{9}$/.test(digits);
-      } else if (startsWithPlus) {
-        isPhoneValid = digits.length >= 10 && digits.length <= 15;
-      }
-
-      return isPhoneValid ? null : 'Please enter a valid mobile number.';
-    },
-  },
-  {
-    key: 'email' as const,
-    prompt: 'And your email address?',
-    placeholder: 'you@example.com',
-    type: 'email',
-    inputMode: 'email' as React.HTMLAttributes<HTMLInputElement>['inputMode'],
-    validate: (v: string) =>
-      /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())
-        ? null
-        : 'Please enter a valid email address.',
   },
 ];
 
@@ -80,6 +50,7 @@ export default function LeadCaptureCard({ onComplete }: LeadCaptureCardProps) {
   const [step, setStep] = useState(0);
   const [values, setValues] = useState({ name: '', phone: '', email: '' });
   const [error, setError] = useState<string | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
   const [done, setDone] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -91,27 +62,107 @@ export default function LeadCaptureCard({ onComplete }: LeadCaptureCardProps) {
     return () => clearTimeout(t);
   }, [step]);
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
+    if (isValidating) return;
     const val = values[current.key];
-    const err = current.validate(val);
-    if (err) { setError(err); return; }
+    if (!val.trim()) {
+      setError(current.key === 'name' ? 'Please enter your name.' : 'Please enter your phone number.');
+      return;
+    }
+
+    setIsValidating(true);
     setError(null);
 
-    if (step < STEPS.length - 1) {
-      setStep(s => s + 1);
-    } else {
-      // All collected — show completion, then call parent
-      setDone(true);
-      const lead: LeadData = {
-        ...values,
-        timestamp: new Date().toISOString(),
-        device: /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop',
-        source: window.location.href,
-      };
-      // Persist locally
-      localStorage.setItem('yhealth_lead_v1', JSON.stringify(lead));
-      // Delay to let user read "all set" before card exits
-      setTimeout(() => onComplete(lead), 1400);
+    try {
+      const response = await fetch('/api/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ step: current.key, value: val }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Validation API error');
+      }
+
+      const result = await response.json();
+      if (!result.valid) {
+        setError(result.reason || (current.key === 'name' ? 'Please enter a valid name.' : 'Please enter a valid phone number.'));
+        setIsValidating(false);
+        return;
+      }
+
+      // Update value with normalized output if any
+      const finalVal = result.normalized || val;
+      setValues(prev => ({ ...prev, [current.key]: finalVal }));
+
+      if (step < STEPS.length - 1) {
+        setStep(s => s + 1);
+      } else {
+        setDone(true);
+        const lead: LeadData = {
+          name: current.key === 'name' ? finalVal : values.name,
+          phone: current.key === 'phone' ? finalVal : values.phone,
+          email: '', // no longer collecting email
+          timestamp: new Date().toISOString(),
+          device: /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop',
+          source: window.location.href,
+        };
+        localStorage.setItem('yhealth_lead_v1', JSON.stringify(lead));
+        setTimeout(() => onComplete(lead), 1400);
+      }
+    } catch (err) {
+      console.warn('Lead capture LLM validation failed/timed out, falling back to local check:', err);
+      // Fallback
+      if (current.key === 'name') {
+        const words = val.trim().split(/\s+/);
+        const containsQuestionWord = /\b(how|what|who|why|where|when|can|you|please|help|greet|tell|symptom|treat|prevent|cure|medicine|clinical)\b/i.test(val);
+        const isSentence = words.length > 3 || containsQuestionWord || val.includes('?');
+        const isBad = val.trim().length < 2 || val.trim().length > 30 || /\d/.test(val) || isSentence;
+        
+        if (isBad) {
+          setError('Please enter your real name (at least 2 letters, no numbers).');
+          setIsValidating(false);
+          return;
+        }
+      } else if (current.key === 'phone') {
+        const digits = val.replace(/\D/g, '');
+        const startsWithPlus = val.trim().startsWith('+');
+        let isPhoneValid = false;
+
+        if (digits.length === 10) {
+          isPhoneValid = /^[6-9]\d{9}$/.test(digits);
+        } else if (digits.length === 11) {
+          isPhoneValid = /^0[6-9]\d{9}$/.test(digits);
+        } else if (digits.length === 12) {
+          isPhoneValid = /^91[6-9]\d{9}$/.test(digits);
+        } else if (startsWithPlus) {
+          isPhoneValid = digits.length >= 10 && digits.length <= 15;
+        }
+
+        if (!isPhoneValid) {
+          setError('Please enter a valid mobile number.');
+          setIsValidating(false);
+          return;
+        }
+      }
+
+      if (step < STEPS.length - 1) {
+        setStep(s => s + 1);
+      } else {
+        setDone(true);
+        const lead: LeadData = {
+          name: values.name || val,
+          phone: values.phone || val,
+          email: '',
+          timestamp: new Date().toISOString(),
+          device: /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop',
+          source: window.location.href,
+        };
+        localStorage.setItem('yhealth_lead_v1', JSON.stringify(lead));
+        setTimeout(() => onComplete(lead), 1400);
+      }
+    } finally {
+      setIsValidating(false);
     }
   };
 
@@ -122,7 +173,7 @@ export default function LeadCaptureCard({ onComplete }: LeadCaptureCardProps) {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setValues(prev => ({ ...prev, [current.key]: val }));
-    if (error) setError(null); // clear on type
+    if (error) setError(null);
   };
 
   /* Progress dots */
@@ -229,8 +280,9 @@ export default function LeadCaptureCard({ onComplete }: LeadCaptureCardProps) {
                 value={values[current.key]}
                 onChange={handleChange}
                 onKeyDown={handleKey}
+                disabled={isValidating}
                 autoComplete="off"
-                className="w-full outline-none font-medium placeholder:font-normal transition-all duration-200"
+                className="w-full outline-none font-medium placeholder:font-normal transition-all duration-200 disabled:opacity-60"
                 style={{
                   height: 52,
                   borderRadius: 14,
@@ -262,7 +314,8 @@ export default function LeadCaptureCard({ onComplete }: LeadCaptureCardProps) {
               {/* Continue button */}
               <button
                 onClick={handleContinue}
-                className="w-full flex items-center justify-center gap-2 font-semibold transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                disabled={isValidating}
+                className="w-full flex items-center justify-center gap-2 font-semibold transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                 style={{
                   height: 50,
                   borderRadius: 14,
@@ -272,8 +325,20 @@ export default function LeadCaptureCard({ onComplete }: LeadCaptureCardProps) {
                   boxShadow: '0 6px 20px rgba(0,0,0,0.14)',
                 }}
               >
-                <span>{step < STEPS.length - 1 ? 'Continue' : 'Get Started'}</span>
-                <ArrowRight className="w-4 h-4" />
+                {isValidating ? (
+                  <div className="flex items-center gap-2">
+                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>Validating…</span>
+                  </div>
+                ) : (
+                  <>
+                    <span>{step < STEPS.length - 1 ? 'Continue' : 'Get Started'}</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
               </button>
             </motion.div>
           )}

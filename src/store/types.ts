@@ -107,6 +107,7 @@ export interface ChatState {
   setIsVerified: (val: boolean) => void;
   setUserName: (name: string) => void;
   restoreExistingUser: (name: string, phone: string, persona?: any, sessionId?: string) => void | Promise<void>;
+  skipOnboarding: () => void | Promise<void>;
 
   startOnboardingConversation: () => void;
   loadPersistedChats: () => void;
