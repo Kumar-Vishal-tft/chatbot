@@ -44,6 +44,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   utm_campaign: null,
   utm_source: null,
   utm_medium: null,
+  utm_content: null,
+  utm_term: null,
   isProgramActivated: false,
 
   // ── Conversation State ────────────────────────────────────────────────────
@@ -113,6 +115,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             conditions: onboardingProfile.conditions || [],
             feeling_note: onboardingProfile.feeling_note || 'Skipped',
             utm_campaign: get().utm_campaign || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_campaign') : null) || 'default',
+            utm_source: get().utm_source || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_source') : null),
+            utm_medium: get().utm_medium || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_medium') : null),
+            utm_content: get().utm_content || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_content') : null),
+            utm_term: get().utm_term || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_term') : null),
           }
         })
       });
@@ -543,6 +549,10 @@ Could you rephrase that? Try something like:
                 conditions: nextProfile.conditions || [],
                 feeling_note: nextProfile.feeling_note || '',
                 utm_campaign: get().utm_campaign || sessionStorage.getItem('utm_campaign') || 'default',
+                utm_source: get().utm_source || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_source') : null),
+                utm_medium: get().utm_medium || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_medium') : null),
+                utm_content: get().utm_content || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_content') : null),
+                utm_term: get().utm_term || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_term') : null),
               }
             })
           })

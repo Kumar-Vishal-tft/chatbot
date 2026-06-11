@@ -158,12 +158,14 @@ export default function Home() {
     const utmSource = params.get('utm_source');
     const utmMedium = params.get('utm_medium');
     const utmCampaign = params.get('utm_campaign');
+    const utmContent = params.get('utm_content');
+    const utmTerm = params.get('utm_term');
 
-    if (utmCampaign) {
-      sessionStorage.setItem('utm_campaign', utmCampaign);
-      if (utmSource) sessionStorage.setItem('utm_source', utmSource);
-      if (utmMedium) sessionStorage.setItem('utm_medium', utmMedium);
-    }
+    if (utmCampaign) sessionStorage.setItem('utm_campaign', utmCampaign);
+    if (utmSource) sessionStorage.setItem('utm_source', utmSource);
+    if (utmMedium) sessionStorage.setItem('utm_medium', utmMedium);
+    if (utmContent) sessionStorage.setItem('utm_content', utmContent);
+    if (utmTerm) sessionStorage.setItem('utm_term', utmTerm);
 
     const resolvedCampaign = sessionStorage.getItem('utm_campaign') || 'default';
     const config = CAMPAIGN_CONFIG[resolvedCampaign] || CAMPAIGN_CONFIG.default;
@@ -173,6 +175,8 @@ export default function Home() {
       utm_campaign: resolvedCampaign,
       utm_source: sessionStorage.getItem('utm_source') || utmSource,
       utm_medium: sessionStorage.getItem('utm_medium') || utmMedium,
+      utm_content: sessionStorage.getItem('utm_content') || utmContent,
+      utm_term: sessionStorage.getItem('utm_term') || utmTerm,
     });
 
     // Capture analytical landing view event
@@ -180,6 +184,8 @@ export default function Home() {
       utm_source: sessionStorage.getItem('utm_source') || utmSource,
       utm_medium: sessionStorage.getItem('utm_medium') || utmMedium,
       utm_campaign: resolvedCampaign,
+      utm_content: sessionStorage.getItem('utm_content') || utmContent,
+      utm_term: sessionStorage.getItem('utm_term') || utmTerm,
       program: config.programId,
       persona: config.persona,
     });
@@ -281,13 +287,19 @@ export default function Home() {
 
     // Retrieve UTM parameters for Get Started tracking
     const dynamicUtmSource = typeof window !== 'undefined' ? sessionStorage.getItem('utm_source') : null;
+    const dynamicUtmMedium = typeof window !== 'undefined' ? sessionStorage.getItem('utm_medium') : null;
     const dynamicUtmCampaign = typeof window !== 'undefined' ? sessionStorage.getItem('utm_campaign') : null;
+    const dynamicUtmContent = typeof window !== 'undefined' ? sessionStorage.getItem('utm_content') : null;
+    const dynamicUtmTerm = typeof window !== 'undefined' ? sessionStorage.getItem('utm_term') : null;
 
     captureAnalyticsEvent('get_started_clicked', {
       tenant: 'yhealth',
       session_type: 'anonymous',
       utm_campaign: dynamicUtmCampaign,
       utm_source: dynamicUtmSource,
+      utm_medium: dynamicUtmMedium,
+      utm_content: dynamicUtmContent,
+      utm_term: dynamicUtmTerm,
     });
 
     setStage('chat');
