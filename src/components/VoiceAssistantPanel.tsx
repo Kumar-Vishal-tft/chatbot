@@ -235,6 +235,8 @@ export default function VoiceAssistantPanel({
     try {
       await ensurePlaybackCtx();
 
+      const hasPersona = !!activePersonaManager.getRawPersona();
+
       // Retrieve current text chat history
       const activeChatId = useChatStore.getState().activeChatId;
       const allMessages = useChatStore.getState().messages;
@@ -251,16 +253,18 @@ export default function VoiceAssistantPanel({
       // Resolve active campaign role focusing prompt
       const utmCampaign = typeof window !== 'undefined' ? sessionStorage.getItem('utm_campaign') || 'default' : 'default';
       let campaignFocusPrompt = "";
-      try {
-        const backendPersonaPrompt = await fetchPredefinedPersona(utmCampaign);
-        if (backendPersonaPrompt) {
-          campaignFocusPrompt = backendPersonaPrompt;
-        } else {
+      if (!hasPersona) {
+        try {
+          const backendPersonaPrompt = await fetchPredefinedPersona(utmCampaign);
+          if (backendPersonaPrompt) {
+            campaignFocusPrompt = backendPersonaPrompt;
+          } else {
+            campaignFocusPrompt = getOfflineCampaignFocusPrompt(utmCampaign);
+          }
+        } catch (e) {
+          console.warn("Failed to fetch predefined campaign persona in voice assistant:", e);
           campaignFocusPrompt = getOfflineCampaignFocusPrompt(utmCampaign);
         }
-      } catch (e) {
-        console.warn("Failed to fetch predefined campaign persona in voice assistant:", e);
-        campaignFocusPrompt = getOfflineCampaignFocusPrompt(utmCampaign);
       }
 
       // Initialize GenAI Live API
@@ -273,7 +277,6 @@ export default function VoiceAssistantPanel({
       const onboardingProfile = useChatStore.getState().onboardingProfile;
       const isOnboarding = onboardingStep !== 'completed';
 
-      const hasPersona = !!activePersonaManager.getRawPersona();
       let voiceSystemInstruction = YHEALTH_PERSONA;
 
       if (isOnboarding) {
@@ -318,6 +321,12 @@ CRITICAL INSTRUCTIONS:
 4. Once you have collected all details, call the "submitLeadProfile" tool to save and register their profile.
 5. After calling the tool, warmly welcome them to YHealth and say that their health profile is now complete.`;
       } else if (hasPersona) {
+        const rawPersona = activePersonaManager.getRawPersona();
+        const doctorName = rawPersona?.care_team?.assigned_doctor?.name 
+          ? `Dr. ${rawPersona.care_team.assigned_doctor.name.replace(/^(dr\.\s*)/i, '')}`
+          : 'their assigned doctor';
+        const doctorSpecialization = rawPersona?.care_team?.assigned_doctor?.specialization || 'Clinical Lead';
+
         const clinicalContextBlock = PersonaContextBuilder.buildContext("voice session initialized", activePersonaManager);
         voiceSystemInstruction = `${YHEALTH_PERSONA}
 
@@ -327,10 +336,10 @@ ${clinicalContextBlock}
 CRITICAL RULES FOR RESPONSES:
 1. You are communicating via real-time speech. Keep your responses extremely short, concise, and natural (1-3 sentences max). Never output long explanations, markdown lists, bullet points, or complex tables because they are hard to understand when spoken!
 2. You MUST speak with a natural, warm Indian English voice tone, accent, and pacing (using Indian English speech syntax, polite phrasing like "Kindly share" or "Please let me know", and common Indian medical terms like "acidity", "loose motions", "body pain", "giddiness", or "tension" when appropriate to match typical Indian conversational style and decorum).
-3. Suggest consulting Samarth Gupta (Endocrinologist) when relevant.
-4. Be supportive and acknowledge their efforts, emphasizing low-glycemic eating and stress reduction.
-5. If they ask about their doctor, mention Dr. Samarth Gupta as their endocrinologist lead.
-6. Address the patient warmly by their name (e.g. Lisha).`;
+3. Suggest consulting ${doctorName} (${doctorSpecialization}) when relevant.
+4. Be supportive and acknowledge their efforts, emphasizing low-glycemic eating, physical activity, and stress reduction as suitable to their history.
+5. If they ask about their doctor, mention ${doctorName} as their ${doctorSpecialization} lead.
+6. Address the patient warmly by their name (e.g. ${rawPersona?.identity?.first_name || 'Lisha'}).`;
       } else {
         // Guest user who finished onboarding but has no custom persona yet
         voiceSystemInstruction = `${YHEALTH_PERSONA}

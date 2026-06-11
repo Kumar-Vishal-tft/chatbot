@@ -29,8 +29,8 @@ export function stopSyncWorker() {
 }
 
 export async function processActiveUsersSync() {
-  // 1. Fetch all users from active_users registry
-  const activeUsers = await redis.smembers('active_users');
+  // 1. Fetch all users from active_users_zset registry
+  const activeUsers = await redis.zrange('active_users_zset', 0, -1);
   if (activeUsers.length === 0) {
     return;
   }
@@ -39,13 +39,21 @@ export async function processActiveUsersSync() {
 
   for (const userId of activeUsers) {
     try {
-      // 2. Check if the user activity flag key exists
+      const messagesKey = `chat:user:${userId}:messages`;
       const activeFlagKey = `chat:user:${userId}:active`;
-      const isActive = await redis.exists(activeFlagKey);
 
-      if (isActive === 0) {
-        // User has been inactive for > 15 minutes (flag expired)
-        console.log(`User ${userId} is inactive. Initiating batch sync...`);
+      // 2. Check the two sync triggers:
+      // a) Inactivity (active flag expired after 15m)
+      const isActive = await redis.exists(activeFlagKey);
+      const isInactive = isActive === 0;
+
+      // b) Message count threshold reached (>= 50 messages)
+      const messageCount = await redis.llen(messagesKey);
+      const reachedCountThreshold = messageCount >= 50;
+
+      if (isInactive || reachedCountThreshold) {
+        const triggerReason = isInactive ? '15m inactivity' : `message count threshold (${messageCount}/50)`;
+        console.log(`User ${userId} satisfies sync condition: ${triggerReason}. Initiating sync...`);
 
         // 3. Acquire duplicate protection sync lock (valid for 60 seconds)
         const lockKey = `chat:user:${userId}:sync_lock`;
@@ -68,17 +76,34 @@ export async function processActiveUsersSync() {
   }
 }
 
+function toValidUUID(id: string): string {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (uuidRegex.test(id)) {
+    return id.toLowerCase();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 async function syncUserMessages(userId: string) {
   const messagesKey = `chat:user:${userId}:messages`;
   const rawMessages = await redis.lrange(messagesKey, 0, -1);
 
   if (rawMessages.length === 0) {
     // No messages to sync, clean up registry
-    console.log(`No messages found for inactive user ${userId}. Cleaning up registry...`);
-    await redis.srem('active_users', userId);
+    console.log(`No messages found for user ${userId}. Cleaning up registry...`);
+    await redis.zrem('active_users_zset', userId);
     await redis.del(`chat:user:${userId}:last_activity`);
+    await redis.del(`chat:user:${userId}:is_existing_patient`);
     return;
   }
+
+  // Fetch patient status flag (existing patient vs guest/new user)
+  const isExistingRaw = await redis.get(`chat:user:${userId}:is_existing_patient`);
+  const isExistingPatient = isExistingRaw === 'true';
 
   // Parse messages and extract session_id
   let sessionId = 'unknown-session';
@@ -100,7 +125,10 @@ async function syncUserMessages(userId: string) {
     }
   }
 
-  // Construct backward-compatible chat pairs for the existing backend
+  // Sanitize sessionId to ensure it is a valid UUID format
+  sessionId = toValidUUID(sessionId);
+
+  // Construct backward-compatible chat pairs (used for both existing sync and guest lead sync)
   const chatPairs: { user: string; agent: string }[] = [];
   for (let i = 0; i < parsedMessages.length; i++) {
     if (parsedMessages[i].role === 'user') {
@@ -119,18 +147,29 @@ async function syncUserMessages(userId: string) {
     }
   }
 
-  const payload = {
-    user_id: userId,
-    session_id: sessionId,
-    messages: parsedMessages,
-    time: Math.floor(Date.now() / 1000), // Existing backend validation requirement
-    chat: chatPairs,                     // Existing backend validation requirement
-  };
-
   const baseUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
-  const backendUrl = `${baseUrl.replace(/\/$/, '')}/chat/sync-messages`;
+  let backendUrl = '';
+  let payload: any = {};
 
-  console.log(`Syncing ${parsedMessages.length} messages to backend for user ${userId} (session: ${sessionId}) to ${backendUrl}...`);
+  if (isExistingPatient) {
+    // Standard sync for existing patients
+    backendUrl = `${baseUrl.replace(/\/$/, '')}/chat/sync-messages`;
+    payload = {
+      user_id: userId,
+      session_id: sessionId,
+      messages: parsedMessages,
+      time: Math.floor(Date.now() / 1000),
+      chat: chatPairs,
+    };
+  } else {
+    // Lead session sync for new/guest users
+    backendUrl = `${baseUrl.replace(/\/$/, '')}/leads/${sessionId}/session`;
+    payload = {
+      history: chatPairs,
+    };
+  }
+
+  console.log(`Syncing ${parsedMessages.length} messages (type: ${isExistingPatient ? 'existing' : 'lead'}) to backend for user ${userId} to ${backendUrl}...`);
 
   try {
     const response = await fetch(backendUrl, {
@@ -146,15 +185,19 @@ async function syncUserMessages(userId: string) {
       console.log(`Successfully synced chat messages for user ${userId} to backend.`);
       // Clear Redis keys on successful sync
       await redis.del(messagesKey);
-      await redis.srem('active_users', userId);
+      await redis.zrem('active_users_zset', userId);
       await redis.del(`chat:user:${userId}:last_activity`);
+      await redis.del(`chat:user:${userId}:is_existing_patient`);
+      await redis.del(`chat:user:${userId}:lead_data`);
     } else {
       const statusText = await response.text();
-      if (response.status === 404 || response.status === 400) {
+      if (response.status === 404 || response.status === 400 || response.status === 422) {
         console.warn(`Permanent error (${response.status}) syncing for user ${userId}. Cleaning up Redis keys to prevent infinite retries.`);
         await redis.del(messagesKey);
-        await redis.srem('active_users', userId);
+        await redis.zrem('active_users_zset', userId);
         await redis.del(`chat:user:${userId}:last_activity`);
+        await redis.del(`chat:user:${userId}:is_existing_patient`);
+        await redis.del(`chat:user:${userId}:lead_data`);
       } else {
         throw new Error(`Backend responded with status ${response.status}: ${statusText}`);
       }

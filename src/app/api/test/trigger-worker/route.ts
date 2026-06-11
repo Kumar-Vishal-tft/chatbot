@@ -3,7 +3,6 @@ import { redis } from '@/lib/redis';
 
 export const dynamic = 'force-dynamic';
 
-// Direct import of the sync worker process to trigger it programmatically for testing
 export async function GET(request: NextRequest) {
   try {
     const testUserId = 'test_user_999';
@@ -13,13 +12,14 @@ export async function GET(request: NextRequest) {
 
     // 1. Clean up any existing test data in Redis
     await redis.del(`chat:user:${testUserId}:messages`);
-    await redis.srem('active_users', testUserId);
+    await redis.zrem('active_users_zset', testUserId);
     await redis.del(`chat:user:${testUserId}:active`);
     await redis.del(`chat:user:${testUserId}:last_activity`);
     await redis.del(`chat:user:${testUserId}:sync_lock`);
+    await redis.del(`chat:user:${testUserId}:is_existing_patient`);
+    await redis.del(`chat:user:${testUserId}:lead_data`);
 
     // 2. Call enqueue endpoint internally by simulating the database insertions
-    // We'll write a couple of test messages (user message and assistant response)
     const testMessages = [
       {
         role: 'user',
@@ -39,19 +39,20 @@ export async function GET(request: NextRequest) {
     for (const msg of testMessages) {
       await redis.rpush(`chat:user:${testUserId}:messages`, JSON.stringify(msg));
     }
-    await redis.sadd('active_users', testUserId);
+    await redis.zadd('active_users_zset', Math.floor(Date.now() / 1000), testUserId);
+    await redis.set(`chat:user:${testUserId}:is_existing_patient`, 'true');
     await redis.set(`chat:user:${testUserId}:active`, 'true', 'EX', 900);
     await redis.set(`chat:user:${testUserId}:last_activity`, Math.floor(Date.now() / 1000).toString());
 
     // Verify keys exist in Redis
     const initialMessages = await redis.lrange(`chat:user:${testUserId}:messages`, 0, -1);
     const initialIsActive = await redis.exists(`chat:user:${testUserId}:active`);
-    const initialInRegistry = await redis.sismember('active_users', testUserId);
+    const initialScore = await redis.zscore('active_users_zset', testUserId);
 
     console.log('[Test] Redis Initial State:', {
       messagesCount: initialMessages.length,
       isActiveFlagPresent: initialIsActive === 1,
-      isInActiveUsersRegistry: initialInRegistry === 1,
+      isInActiveUsersRegistry: initialScore !== null,
     });
 
     // 3. Simulate 15 minutes of inactivity by deleting the active flag key
@@ -61,24 +62,10 @@ export async function GET(request: NextRequest) {
     // Verify active flag is gone
     const simulatedIsActive = await redis.exists(`chat:user:${testUserId}:active`);
 
-    // 4. Force run the sync worker logic by importing it
+    // 4. Force run the sync worker logic
     console.log('[Test] Force-triggering background sync worker process...');
-    const { startSyncWorker } = await import('@/lib/syncWorker');
-    
-    // We start the sync worker to make sure it's running, but we also run the check function directly
-    // since the worker runs on a setInterval. We can wait a short period to let it run or call it.
-    // Let's sleep for 2 seconds to let the interval run, or we can just wait.
-    // Wait, the interval is 30 seconds. So instead of waiting 30 seconds, let's call the check logic.
-    // To do that, we'll export the process function or just wait for it.
-    // Let's write a small helper inside syncWorker or just run it.
-    // Actually, we can wait a bit or we can just run the function.
-    // Let's call processActiveUsersSync if we export it, or we can just run it.
-    // Wait! Let's make processActiveUsersSync exported from syncWorker.ts so we can call it here directly!
-    
-    // Let's import it:
     const syncWorkerModule = await import('@/lib/syncWorker');
-    // We will update syncWorker.ts to export processActiveUsersSync so we can trigger it immediately in tests!
-    // Let's call it:
+    
     let syncError = null;
     if ((syncWorkerModule as any).processActiveUsersSync) {
       try {
@@ -93,12 +80,12 @@ export async function GET(request: NextRequest) {
     // 5. Verify final state in Redis
     const finalMessages = await redis.lrange(`chat:user:${testUserId}:messages`, 0, -1);
     const finalIsActive = await redis.exists(`chat:user:${testUserId}:active`);
-    const finalInRegistry = await redis.sismember('active_users', testUserId);
+    const finalScore = await redis.zscore('active_users_zset', testUserId);
 
     console.log('[Test] Redis Final State:', {
       messagesCount: finalMessages.length,
       isActiveFlagPresent: finalIsActive === 1,
-      isInActiveUsersRegistry: finalInRegistry === 1,
+      isInActiveUsersRegistry: finalScore !== null,
     });
 
     return NextResponse.json({
@@ -107,7 +94,7 @@ export async function GET(request: NextRequest) {
         initial: {
           messagesCount: initialMessages.length,
           isActive: initialIsActive === 1,
-          inRegistry: initialInRegistry === 1
+          inRegistry: initialScore !== null
         },
         simulatedInactivity: {
           isActive: simulatedIsActive === 1
@@ -115,7 +102,7 @@ export async function GET(request: NextRequest) {
         final: {
           messagesCount: finalMessages.length,
           isActive: finalIsActive === 1,
-          inRegistry: finalInRegistry === 1
+          inRegistry: finalScore !== null
         },
         syncError
       }

@@ -13,19 +13,6 @@ export function parseCareTeam(data: any): ParsedSection {
   let docSpec = safeGet(doctor?.specialization, "General Physician");
   const programName = safeGet(program?.program_name, "None active");
 
-  // Avoid self-assignment name collision (where the test database assigns the patient to themselves)
-  const identity = safeGet(data?.identity, {});
-  const patientFirstName = safeGet(identity?.first_name, "");
-  const patientLastName = safeGet(identity?.last_name, "");
-  const patientFullName = `${patientFirstName} ${patientLastName}`.trim();
-
-  if (
-    patientFullName &&
-    docName.toLowerCase().replace(/^(dr\.\s*)/, '').trim() === patientFullName.toLowerCase()
-  ) {
-    docName = "Samarth Gupta";
-    docSpec = "Endocrinologist";
-  }
 
   const latestNote = safeGet(notes?.note, "No clinical note uploaded");
   const rxName = safeGet(prescription?.file_name, "No prescription uploaded");

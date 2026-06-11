@@ -72,18 +72,46 @@ export class PersonaManager {
 
   private sanitizeSelfAssignment(text: string): string {
     if (!text || !this.rawPersona) return text;
+    
+    let sanitized = text;
+
+    // 1. Patient Name Sanitization: Replace "Neha Aggarwal" and "Neha" with the actual patient name if different
     const identity = this.rawPersona.identity || {};
-    const first = safeGet(identity.first_name, "").trim();
-    const last = safeGet(identity.last_name, "").trim();
-    const fullName = `${first} ${last}`.trim();
-    if (!fullName) return text;
+    const pFirst = safeGet(identity.first_name, "").trim();
+    const pLast = safeGet(identity.last_name, "").trim();
+    const pFullName = `${pFirst} ${pLast}`.trim();
 
-    // Case-insensitive regex to clean up doctor name references matching patient full name
-    const drRegex = new RegExp(`dr\\.?\\s*${fullName}`, 'gi');
-    let sanitized = text.replace(drRegex, 'Dr. Samarth Gupta');
+    if (pFullName && !/neha/i.test(pFullName)) {
+      sanitized = sanitized.replace(/Neha\s+Aggarwal/gi, pFullName);
+      sanitized = sanitized.replace(/\bNeha\b/g, pFirst);
+    }
 
-    const docRegex = new RegExp(`doctor\\s*${fullName}`, 'gi');
-    sanitized = sanitized.replace(docRegex, 'Dr. Samarth Gupta');
+    // 2. Doctor Name Sanitization: Replace "Samarth Gupta" and "Samarth" with the actual doctor's name
+    const team = this.rawPersona.care_team || {};
+    const doctor = team.assigned_doctor || {};
+    const docName = safeGet(doctor.name, "").trim();
+    const docSpec = safeGet(doctor.specialization, "").trim();
+
+    if (docName && !/samarth/i.test(docName)) {
+      sanitized = sanitized.replace(/Samarth\s+Gupta/gi, docName);
+      sanitized = sanitized.replace(/\bSamarth\b/g, docName.split(' ')[0]);
+    }
+
+    // 3. Specialization Sanitization: Replace "Endocrinologist" with the actual specialization
+    if (docSpec && !/endocrinologist/i.test(docSpec)) {
+      sanitized = sanitized.replace(/Endocrinologist/gi, docSpec);
+    }
+
+    // 4. Diagnoses Sanitization: Replace gestational diabetes if they have a different diagnosis
+    const clinical = this.rawPersona.clinical_context || {};
+    const diagnoses = clinical.diagnoses || [];
+    if (diagnoses.length > 0) {
+      const primaryDiagnosis = diagnoses[0].diagnosis;
+      if (primaryDiagnosis && !/gestational/i.test(primaryDiagnosis)) {
+        sanitized = sanitized.replace(/gestational\s+diabetes/gi, primaryDiagnosis);
+        sanitized = sanitized.replace(/Gestational\s+Diabetes/gi, primaryDiagnosis);
+      }
+    }
 
     return sanitized;
   }

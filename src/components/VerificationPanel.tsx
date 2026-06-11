@@ -5,7 +5,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ShieldCheck, X, RefreshCw, ChevronLeft, CheckCircle2, Loader2 } from 'lucide-react';
 import { useChatStore, getTimeBasedGreeting } from '@/store/chatStore';
 import { BACKEND_URL } from '@/store/config';
-import { PATIENT_PERSONA_MOCK } from '@/persona/patientMock';
 import { captureAnalyticsEvent } from '@/utils/analytics';
 
 /* ─── Types ────────────────────────────────────────────── */
@@ -319,41 +318,10 @@ export default function VerificationPanel({ onVerified, onClose }: VerificationP
       })
       .catch(err => {
         captureAnalyticsEvent('patient_verification_failed', { reason: err.message || "Unknown error" });
-        if (err.status) {
-          // Real backend validation error (e.g. 400 Bad Request / 404 Not Found)
-          setOtpError(err.message || "We couldn't find a health profile linked to this mobile number.");
-          setStep('otp');
-          setOtp(Array(OTP_LENGTH).fill(''));
-          setTimeout(() => otpRefs.current[0]?.focus(), 50);
-        } else {
-          // Server completely offline: fallback to local patient mock only for mock number
-          const isMockNumber = phone.replace(/\D/g, '').endsWith('8777846383');
-          if (isMockNumber) {
-            console.warn('verify-otp API unreachable/failed. Falling back to offline patient mock profile:', err);
-            fetchedPersona = PATIENT_PERSONA_MOCK;
-            const finalName = fetchedPersona?.identity?.first_name
-              ? `${fetchedPersona.identity.first_name} ${fetchedPersona.identity.last_name || ''}`.trim()
-              : 'Neha Aggarwal';
-            setVerifiedPatientName(finalName);
-
-            captureAnalyticsEvent('patient_verified');
-            setTimeout(() => {
-              setStep('success');
-              setTimeout(() => {
-                onVerified({
-                  name: finalName,
-                  phone: phone || fetchedPersona?.identity?.phone || '+91 87778 46383',
-                  persona: fetchedPersona
-                });
-              }, 1600);
-            }, 1800);
-          } else {
-            setOtpError("We couldn't find a health profile linked to this mobile number.");
-            setStep('otp');
-            setOtp(Array(OTP_LENGTH).fill(''));
-            setTimeout(() => otpRefs.current[0]?.focus(), 50);
-          }
-        }
+        setOtpError(err.message || "We couldn't find a health profile linked to this mobile number.");
+        setStep('otp');
+        setOtp(Array(OTP_LENGTH).fill(''));
+        setTimeout(() => otpRefs.current[0]?.focus(), 50);
       });
   };
 

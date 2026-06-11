@@ -1,5 +1,5 @@
 # ─── Stage 1: Install Dependencies ──────────────────────────────────────────
-FROM node:18-alpine AS deps
+FROM node:20-alpine AS deps
 # Check https://github.com/nodejs/docker-node/tree/b4117f9333da4138b03a546ec926ef50a31506c3#nodealpine for why libc6-compat might be needed.
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
@@ -9,7 +9,7 @@ COPY package*.json ./
 RUN npm ci
 
 # ─── Stage 2: Rebuild the Source Code ────────────────────────────────────────
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -34,7 +34,7 @@ ENV NEXT_PUBLIC_APP_ENV=$NEXT_PUBLIC_APP_ENV
 RUN npm run build
 
 # ─── Stage 3: Runner Stage ──────────────────────────────────────────────────
-FROM node:18-alpine AS runner
+FROM node:20-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production

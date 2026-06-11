@@ -9,7 +9,7 @@
 
 import { create } from 'zustand';
 import { ChatState, ChatSession, Message, LastBotMessageType } from './types';
-import { saveChatState, syncSessionWithRedis, syncConversationWithBackend, triggerDebouncedSync, isLikelyGibberish, isGreetingOrFiller, generateUUID } from './utils';
+import { saveChatState, syncSessionWithRedis, syncConversationWithBackend, triggerDebouncedSync, isLikelyGibberish, isGreetingOrFiller, generateUUID, generateUUIDv7, toValidUUID } from './utils';
 
 import { fetchGeminiResponse, fetchGreetingResponse, verifyUserData } from './api';
 import { RESTORED_SESSIONS, RESTORED_MESSAGES } from './constants';
@@ -176,7 +176,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const userMessage: Message = {
-      id: Math.random().toString(36).substring(7),
+      id: generateUUIDv7(),
       sender: 'user',
       content,
       timestamp,
@@ -283,7 +283,7 @@ Could you rephrase that? Try something like:
               set({ greetingShown: true, onboardingStep: 'asked_name' });
             }
           } else {
-            const apiReply = await fetchGeminiResponse(content, [], nextProfile);
+            const apiReply = await fetchGeminiResponse(content, [], nextProfile, get().isExistingPatient, get().activeChatId || undefined);
             if (!greetingShown) {
               matchedResponse = `${apiReply}\n\n---\n\nBy the way — I'm YHealth, your health assistant! **What should I call you?**`;
               nextStep = 'asked_name';
@@ -362,7 +362,7 @@ Could you rephrase that? Try something like:
           if (!verification.isValid) {
             if (verification.isQuestionOrQuery) {
               // User asked a health question instead of giving name → answer it first, re-ask softly
-              const apiReply = await fetchGeminiResponse(content, [], nextProfile);
+              const apiReply = await fetchGeminiResponse(content, [], nextProfile, get().isExistingPatient, get().activeChatId || undefined);
               matchedResponse = `${apiReply}\n\n---\n\nBy the way, I still don't know your name! **What should I call you?**`;
               nextBotMessageType = 'health_reply';
             } else {
@@ -384,7 +384,7 @@ Could you rephrase that? Try something like:
 
           if (!verification.isValid) {
             if (verification.isQuestionOrQuery) {
-              const apiReply = await fetchGeminiResponse(content, [], nextProfile);
+              const apiReply = await fetchGeminiResponse(content, [], nextProfile, get().isExistingPatient, get().activeChatId || undefined);
               matchedResponse = `${apiReply}\n\n---\n\nAlso — **how old are you?** It helps me tailor my suggestions for you.`;
               nextBotMessageType = 'health_reply';
             } else {
@@ -728,7 +728,7 @@ Could you rephrase that? Try something like:
 
       // ── 4. Health query before onboarding started (not_started) ──────────
       else if (!isVerified && onboardingStep === 'not_started' && isHealthQuery) {
-        const apiReply = await fetchGeminiResponse(content, [], nextProfile);
+        const apiReply = await fetchGeminiResponse(content, [], nextProfile, get().isExistingPatient, get().activeChatId || undefined);
         // Answer health question first, then softly ask name once
         if (!greetingShown) {
           matchedResponse = `${apiReply}\n\n---\n\nBy the way — I'm YHealth, your health assistant! **What should I call you?**`;
@@ -751,7 +751,7 @@ Could you rephrase that? Try something like:
       // ── 5. Active chat (onboarding complete OR verified) ─────────────────
       else {
         const history = get().messages[chatId] || [];
-        matchedResponse = await fetchGeminiResponse(content, history.slice(-11, -1), onboardingProfile); // keep last 5 turns (10 messages) of context
+        matchedResponse = await fetchGeminiResponse(content, history.slice(-11, -1), onboardingProfile, get().isExistingPatient, get().activeChatId || undefined); // keep last 5 turns (10 messages) of context
         nextBotMessageType = 'health_reply';
       }
 
@@ -765,7 +765,7 @@ Could you rephrase that? Try something like:
 
 
       // ── Stream the response character-by-character ─────────────────────
-      const assistantMessageId = Math.random().toString(36).substring(7);
+      const assistantMessageId = generateUUIDv7();
       const assistantMessage: Message = {
         id: assistantMessageId,
         sender: 'assistant',
@@ -861,29 +861,115 @@ Could you rephrase that? Try something like:
       lastBotMessageType: 'onboarding_complete',
     });
 
+    let localSessions: ChatSession[] = [];
+    let localMessages: Record<string, Message[]> = {};
+
+    // 1. Try to load patient chat and queries record from Redis cache database
     try {
-      // 1. Try to load patient chat and queries record from Redis cache database
       const res = await fetch(`/api/session/load?sessionId=${resolvedSessionId}`);
       if (res.ok) {
         const data = await res.json();
         if (data.success && data.sessions && data.sessions.length > 0) {
-          const activeId = data.sessions[0].id;
+          localSessions = data.sessions;
+          localMessages = data.messages;
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to restore patient history from Redis:', err);
+    }
+
+    // 2. Fetch history from the backend messages endpoint and merge
+    try {
+      const validUUID = toValidUUID(resolvedSessionId);
+      const res = await fetch(`/api/chat/sessions/${validUUID}/messages?limit=100&offset=0`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.messages && data.messages.length > 0) {
+          const mappedBackendMessages: Message[] = data.messages.map((m: any) => {
+            const baseTime = m.created_at ? new Date(m.created_at).getTime() : Date.now();
+            // Offset each message by turn_index × 5 seconds so that messages sharing the
+            // same backend created_at (e.g. user question + AI reply stored simultaneously)
+            // still show distinct, sequential timestamps in the UI.
+            const turnOffset = (typeof m.turn_index === 'number' ? m.turn_index : 0) * 5000;
+            const adjustedTime = baseTime + turnOffset;
+            const adjustedDate = new Date(adjustedTime);
+            return {
+              id: generateUUIDv7(),
+              sender: m.role === 'user' ? 'user' : 'assistant',
+              content: m.content,
+              timestamp: adjustedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+              created_at: adjustedTime,
+            };
+          });
+
+          // Retrieve messages for the active session, fallback to empty
+          const targetSessionId = localSessions[0]?.id || resolvedSessionId;
+          const currentLocalMsgs = localMessages[targetSessionId] || [];
+
+          // Combine lists
+          const allMessages = [...mappedBackendMessages, ...currentLocalMsgs];
+
+          // De-duplicate using 5-minute time window
+          const mergedMessages: Message[] = [];
+          for (const msg of allMessages) {
+            const isDuplicate = mergedMessages.some(existing => 
+              existing.sender === msg.sender &&
+              existing.content.trim() === msg.content.trim() &&
+              Math.abs((existing.created_at || 0) - (msg.created_at || 0)) < 300000
+            );
+            if (!isDuplicate) {
+              mergedMessages.push(msg);
+            }
+          }
+
+          // Sort chronologically by created_at (ascending order)
+          mergedMessages.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+
+          const activeId = targetSessionId;
+          const updatedSessions = localSessions.length > 0
+            ? localSessions
+            : [{
+                id: activeId,
+                title: 'Active Health Companion',
+                timestamp: new Date().toLocaleDateString([], { month: 'short', day: 'numeric' }),
+              }];
+
+          const updatedMessagesMap = {
+            ...localMessages,
+            [activeId]: mergedMessages,
+          };
+
           set({
-            chatSessions: data.sessions,
-            messages: data.messages,
+            chatSessions: updatedSessions,
+            messages: updatedMessagesMap,
             activeChatId: activeId,
             isRestoring: false,
           });
-          // Sync to local storage to maintain synchronization
-          saveChatState(data.sessions, data.messages, activeId);
+
+          // Sync back to local storage and Redis cache
+          saveChatState(updatedSessions, updatedMessagesMap, activeId);
+          syncSessionWithRedis(updatedSessions, updatedMessagesMap, activeId);
           return;
         }
       }
     } catch (err) {
-      console.warn('Failed to restore patient history from Redis, falling back to campaign welcome:', err);
+      console.warn('Failed to fetch/merge patient history from backend API:', err);
     }
 
-    // 2. Fallback: No history in Redis. Create fresh "welcome back" session
+    // Fallback if no backend messages were restored
+    if (localSessions.length > 0) {
+      const activeId = localSessions[0].id;
+      set({
+        chatSessions: localSessions,
+        messages: localMessages,
+        activeChatId: activeId,
+        isRestoring: false,
+      });
+      saveChatState(localSessions, localMessages, activeId);
+      return;
+    }
+
+    // 3. Fallback: No history anywhere. Create fresh "welcome back" session
     const newChatId = generateUUID();
     const newSession = {
       id: newChatId,
@@ -899,7 +985,7 @@ Could you rephrase that? Try something like:
     const followUpsText = config.suggestedPrompts.join(' | ');
 
     const welcomeMsg: Message = {
-      id: Math.random().toString(36).substring(7),
+      id: generateUUIDv7(),
       sender: 'assistant',
       content: `Welcome back, ${capitalizedName}! 👋\n\n${welcomeTemplateText}\n\n[FollowUps: ${followUpsText}]`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -949,7 +1035,7 @@ Could you rephrase that? Try something like:
     setTimeout(async () => {
       const welcomeText = await fetchGreetingResponse('hi', true, undefined, []);
 
-      const assistantMessageId = Math.random().toString(36).substring(7);
+      const assistantMessageId = generateUUIDv7();
       const welcomeMsg: Message = {
         id: assistantMessageId,
         sender: 'assistant',
@@ -1020,6 +1106,33 @@ Could you rephrase that? Try something like:
         // Save locally and cache immediately in Redis
         saveChatState([newSession], initialMessages, newGuestSessionId);
         await syncSessionWithRedis([newSession], initialMessages, newGuestSessionId);
+      }
+
+      // Mark all loaded/restored message IDs as enqueued
+      const currentMessages = get().messages;
+      const allMessageIds = new Set<string>();
+      Object.values(currentMessages).forEach((msgs) => {
+        msgs.forEach((m) => {
+          if (m.id) allMessageIds.add(m.id);
+        });
+      });
+      if (allMessageIds.size > 0) {
+        try {
+          const stored = localStorage.getItem('yhealth_enqueued_message_ids');
+          const enqueuedSet = stored ? new Set<string>(JSON.parse(stored)) : new Set<string>();
+          let changed = false;
+          allMessageIds.forEach((id) => {
+            if (!enqueuedSet.has(id)) {
+              enqueuedSet.add(id);
+              changed = true;
+            }
+          });
+          if (changed) {
+            localStorage.setItem('yhealth_enqueued_message_ids', JSON.stringify(Array.from(enqueuedSet)));
+          }
+        } catch (e) {
+          console.warn('Error marking restored messages as enqueued:', e);
+        }
       }
 
       // 3. Polling dropped in favor of event-driven sync triggered when messages arrive (debounced)

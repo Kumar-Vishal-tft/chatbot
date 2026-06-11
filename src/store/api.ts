@@ -157,30 +157,36 @@ Your primary focus is Metabolic Health and Preventive Wellness.
 export async function fetchGeminiResponse(
   prompt: string,
   history: Message[],
-  profile?: OnboardingProfile
+  profile?: OnboardingProfile,
+  isExistingPatient: boolean = false,
+  sessionId?: string
 ): Promise<string> {
-  // Retrieve the patient type status from Zustand store
-  let isExistingPatient = false;
-  try {
-    const { useChatStore } = require('./chatStore');
-    isExistingPatient = useChatStore.getState().isExistingPatient;
-  } catch (e) { }
-
   // Check if we have an active patient persona loaded AND the user is an existing patient
   const hasPersona = !!activePersonaManager.getRawPersona() && isExistingPatient;
   const clinicalContextBlock = hasPersona ? PersonaContextBuilder.buildContext(prompt, activePersonaManager) : "";
+
+  // Resolve dynamic active patient profile values
+  const rawPersona = hasPersona ? activePersonaManager.getRawPersona() : null;
+  const doctorName = rawPersona?.care_team?.assigned_doctor?.name 
+    ? `Dr. ${rawPersona.care_team.assigned_doctor.name.replace(/^(dr\.\s*)/i, '')}`
+    : 'their assigned doctor';
+  const doctorSpecialization = rawPersona?.care_team?.assigned_doctor?.specialization || 'Clinical Lead';
+  const diagnosesList = rawPersona?.clinical_context?.diagnoses && rawPersona.clinical_context.diagnoses.length > 0
+    ? rawPersona.clinical_context.diagnoses.map((d: any) => `${d.diagnosis} (${d.status})`).join(', ')
+    : 'relevant health conditions';
 
   // Resolve active campaign role focusing prompt
   const utmCampaign = typeof window !== 'undefined' ? sessionStorage.getItem('utm_campaign') || 'default' : 'default';
 
   // Try to load the predefined campaign persona from backend API, fallback to offline prompt if unavailable
   let campaignFocusPrompt = "";
-  const backendPersonaPrompt = await fetchPredefinedPersona(utmCampaign);
-
-  if (backendPersonaPrompt) {
-    campaignFocusPrompt = backendPersonaPrompt;
-  } else {
-    campaignFocusPrompt = getOfflineCampaignFocusPrompt(utmCampaign);
+  if (!hasPersona) {
+    const backendPersonaPrompt = await fetchPredefinedPersona(utmCampaign);
+    if (backendPersonaPrompt) {
+      campaignFocusPrompt = backendPersonaPrompt;
+    } else {
+      campaignFocusPrompt = getOfflineCampaignFocusPrompt(utmCampaign);
+    }
   }
 
   const systemInstruction = `You are YHealth AI, a warm and knowledgeable health companion.
@@ -207,8 +213,8 @@ ${clinicalContextBlock}
 
 CRITICAL RULES FOR RESPONDING:
 1. You MUST maintain standard Indian professional medical conversational decorum.
-2. The user has history of Gestational Diabetes and potential primary hypothyroidism. Suggest consulting Samarth Gupta (Endocrinologist) when relevant.
-3. Be supportive and acknowledge their efforts, emphasizing low-glycemic eating and stress reduction.
+2. The user has history of ${diagnosesList}. Suggest consulting ${doctorName} (${doctorSpecialization}) when relevant.
+3. Be supportive and acknowledge their efforts, emphasizing low-glycemic eating, physical activity, and stress reduction as suitable to their history.
 4. If the user's query is asking for extended patient details, previous/historical records, past logs, or older medical reports that are NOT present in the active patient clinical history & context block above, you MUST output exactly \`[FALLBACK_TO_MONGO]\` as your entire response. Do NOT output anything else. If the query can be answered using the basic patient summary and current details already provided in the context block above, or if it is a general health question, answer it directly.`
       : `User profile:
 ${profile
@@ -365,11 +371,7 @@ Use standard Markdown formatting (lists, bolding, headers, tables, strategic ale
       }
 
       // Asynchronously trigger Langfuse tracing (non-blocking)
-      let activeChatId = undefined;
-      try {
-        const { useChatStore } = require('./chatStore');
-        activeChatId = useChatStore.getState().activeChatId;
-      } catch (e) { }
+      const activeChatId = sessionId;
 
       fetch('/api/trace', {
         method: 'POST',

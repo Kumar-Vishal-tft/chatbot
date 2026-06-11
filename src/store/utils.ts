@@ -227,11 +227,6 @@ export const syncConversationWithBackend = async (
   const { useChatStore } = await import('./chatStore');
   const storeState = useChatStore.getState();
 
-  // For new/guest users, we bypass the standard chat sync endpoint (Option B: we only send history once on onboarding completion)
-  if (!storeState.isExistingPatient) {
-    return;
-  }
-
   // Resolve session UUID (prioritizing the verified backend UUID, fallback to activeChatId)
   const rawId = storeState.sessionId || activeId || storeState.activeChatId || localStorage.getItem('yhealth_active_chat_id') || 'guest-session';
   const sessionUUID = toValidUUID(rawId);
@@ -289,6 +284,7 @@ export const syncConversationWithBackend = async (
       role: msg.sender, // 'user' or 'assistant'
       message: msg.content,
       timestamp: Math.floor((msg.created_at || Date.now()) / 1000),
+      is_existing_patient: storeState.isExistingPatient,
     };
 
     try {
@@ -324,5 +320,38 @@ export function generateUUID(): string {
     const v = c === 'x' ? r : (r & 0x3) | 0x8;
     return v.toString(16);
   });
+}
+
+/**
+ * Generates an RFC 9562 compliant UUID v7 (time-based with 1ms resolution).
+ * Safe to run in both browser and Server/Node.js environments.
+ */
+export function generateUUIDv7(): string {
+  const now = Date.now();
+  const hexTime = now.toString(16).padStart(12, '0');
+  
+  const randomArray = new Uint8Array(10);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(randomArray);
+  } else if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
+    window.crypto.getRandomValues(randomArray);
+  } else {
+    for (let i = 0; i < 10; i++) {
+      randomArray[i] = Math.floor(Math.random() * 256);
+    }
+  }
+  
+  let randomHex = '';
+  randomArray.forEach(b => {
+    randomHex += b.toString(16).padStart(2, '0');
+  });
+
+  return [
+    hexTime.slice(0, 8),
+    hexTime.slice(8, 12),
+    '7' + randomHex.slice(1, 4),
+    (parseInt(randomHex.slice(4, 5), 16) & 0x3 | 0x8).toString(16) + randomHex.slice(5, 8),
+    randomHex.slice(8, 20)
+  ].join('-');
 }
 
