@@ -189,6 +189,11 @@ export async function fetchGeminiResponse(
     }
   }
 
+  const isInOnboarding = profile && (!profile.name || !profile.age || !profile.gender || !profile.phone_number || !profile.health_goal || !profile.conditions || !profile.feeling_note);
+  const questionOverride = isInOnboarding
+    ? `\n\nCRITICAL INSTRUCTION: The user is currently in the onboarding flow and has sent a general query/question: "${prompt}". You MUST directly, clearly, and concisely answer their query/question in 2-3 sentences. Do NOT output any standard welcome greeting, introduction, or campaign starting script (like "Hello! I am Dr. Dia..."). Focus entirely on answering their query.`
+    : ``;
+
   const systemInstruction = `You are YHealth AI, a warm and knowledgeable health companion.
 Your tone is calm, supportive, friendly, and clear — like a trusted health-savvy friend, not a hospital system.
 
@@ -227,7 +232,7 @@ ${profile
       }`
     }
 
-Remember: Be warm, clear, and genuinely helpful. Always recommend seeing a doctor for diagnosis, but do so naturally — never in a defensive or robotic way. NEVER use any emojis in your output.`;
+Remember: Be warm, clear, and genuinely helpful. Always recommend seeing a doctor for diagnosis, but do so naturally — never in a defensive or robotic way. NEVER use any emojis in your output.${questionOverride}`;
 
   const mappedHistory = history.map((msg) => ({
     role: msg.sender === 'user' ? 'user' : 'model',
@@ -758,12 +763,17 @@ export async function extractOnboardingEntities(
         res.name = nameVal.charAt(0).toUpperCase() + nameVal.slice(1).toLowerCase();
       }
     } else {
-      const firstWord = content.trim().split(/[\s,]+/)[0];
-      const isWordGreeting = isGreetingOrFiller(firstWord);
-      const hasLetters = /^[A-Za-z]{2,15}$/.test(firstWord);
-      const isCommonKeyword = /^(male|female|skip|none|diabetes|hypertension|my|i|im|am)$/i.test(firstWord);
-      if (hasLetters && !isWordGreeting && !isCommonKeyword) {
-        res.name = firstWord.charAt(0).toUpperCase() + firstWord.slice(1).toLowerCase();
+      const containsQuestionOrVerb = /\b(how|what|who|why|where|when|which|can|could|should|would|is|are|do|does|help|symptom|tell|explain|treat|prevent|cure|medicine|clinical)\b/i.test(lower);
+      const isSentence = containsQuestionOrVerb || content.includes('?') || content.trim().split(/\s+/).length > 2;
+
+      if (!isSentence) {
+        const firstWord = content.trim().split(/[\s,]+/)[0];
+        const isWordGreeting = isGreetingOrFiller(firstWord);
+        const hasLetters = /^[A-Za-z]{2,15}$/.test(firstWord);
+        const isCommonKeyword = /^(male|female|skip|none|diabetes|hypertension|my|i|im|am|what|how|why|when|where|who|which|help)$/i.test(firstWord);
+        if (hasLetters && !isWordGreeting && !isCommonKeyword) {
+          res.name = firstWord.charAt(0).toUpperCase() + firstWord.slice(1).toLowerCase();
+        }
       }
     }
   }

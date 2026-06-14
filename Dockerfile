@@ -1,22 +1,13 @@
-# ─── Stage 1: Install Dependencies ──────────────────────────────────────────
-FROM node:20-alpine AS deps
-# Check https://github.com/nodejs/docker-node/tree/b4117f9333da4138b03a546ec926ef50a31506c3#nodealpine for why libc6-compat might be needed.
-RUN apk add --no-cache libc6-compat
+# ─── Stage 1: Build the Source Code ─────────────────────────────────────────
+FROM node:20-slim AS builder
 WORKDIR /app
 
-# Install dependencies
+# Copy package descriptors and node_modules pre-installed on the host
 COPY package*.json ./
-RUN npm ci
-
-# ─── Stage 2: Rebuild the Source Code ────────────────────────────────────────
-FROM node:20-alpine AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
+COPY node_modules ./node_modules
 COPY . .
 
-# Next.js collects completely anonymous telemetry data about general usage.
-# Learn more here: https://nextjs.org/telemetry
-# Disable telemetry during the build.
+# Disable telemetry during the build
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # Declare build arguments so that NEXT_PUBLIC_ variables are inlined at build time
@@ -25,23 +16,24 @@ ARG NEXT_PUBLIC_BACKEND_URL
 ARG NEXT_PUBLIC_APP_NAME
 ARG NEXT_PUBLIC_APP_ENV
 
-# Set them as environment variables during build execution
+# Set environment variables during build execution
 ENV NEXT_PUBLIC_GEMINI_API_KEY=$NEXT_PUBLIC_GEMINI_API_KEY
 ENV NEXT_PUBLIC_BACKEND_URL=$NEXT_PUBLIC_BACKEND_URL
 ENV NEXT_PUBLIC_APP_NAME=$NEXT_PUBLIC_APP_NAME
 ENV NEXT_PUBLIC_APP_ENV=$NEXT_PUBLIC_APP_ENV
 
+# Build Next.js (output standalone) offline using host's node_modules
 RUN npm run build
 
-# ─── Stage 3: Runner Stage ──────────────────────────────────────────────────
-FROM node:20-alpine AS runner
+# ─── Stage 2: Runner Stage ──────────────────────────────────────────────────
+FROM node:20-slim AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
+# Create standard non-root group and user on Debian
+RUN groupadd --system --gid 1001 nodejs && useradd --system --uid 1001 -g nodejs nextjs
 
 # Set correct permissions for static and cache files
 COPY --from=builder /app/public ./public

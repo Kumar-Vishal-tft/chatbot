@@ -131,16 +131,23 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
       return;
     }
 
-    let currentOptions = [...selectedOptions];
+    const optionLower = option.toLowerCase();
+    const isAlreadySelected = selectedOptions.some((o) => o.toLowerCase() === optionLower);
+
+    let currentOptions: string[] = [];
 
     if (option === 'None') {
-      currentOptions = ['None'];
-    } else {
-      currentOptions = currentOptions.filter((o) => o !== 'None');
-      if (currentOptions.includes(option)) {
-        currentOptions = currentOptions.filter((o) => o !== option);
+      if (isAlreadySelected) {
+        currentOptions = [];
       } else {
-        currentOptions.push(option);
+        currentOptions = ['None'];
+      }
+    } else {
+      const cleanOptions = selectedOptions.filter((o) => o.toLowerCase() !== 'none');
+      if (isAlreadySelected) {
+        currentOptions = cleanOptions.filter((o) => o.toLowerCase() !== optionLower);
+      } else {
+        currentOptions = [...cleanOptions, option];
       }
     }
 
@@ -277,7 +284,7 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
           <span className="block text-[10px] font-bold tracking-wider text-neutral-400 dark:text-neutral-500 uppercase mb-2">Select your gender:</span>
           <div className="flex flex-wrap gap-2">
             {GENDER_OPTIONS.map((opt) => {
-              const isSelected = selectedOptions.includes(opt);
+              const isSelected = selectedOptions.some((s) => s.toLowerCase() === opt.toLowerCase());
               return (
                 <button
                   key={opt}
@@ -302,7 +309,7 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
           <span className="block text-[10px] font-bold tracking-wider text-neutral-400 dark:text-neutral-500 uppercase mb-2">What would you most like help with? (Tap to select multiple)</span>
           <div className="flex flex-wrap gap-2">
             {GOAL_OPTIONS.map((opt) => {
-              const isSelected = selectedOptions.includes(opt);
+              const isSelected = selectedOptions.some((s) => s.toLowerCase() === opt.toLowerCase());
               return (
                 <button
                   key={opt}
@@ -327,7 +334,7 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
           <span className="block text-[10px] font-bold tracking-wider text-neutral-400 dark:text-neutral-500 uppercase mb-2">Do you have any existing medical conditions? (Tap to select multiple)</span>
           <div className="flex flex-wrap gap-2">
             {CONDITION_OPTIONS.map((opt) => {
-              const isSelected = selectedOptions.includes(opt);
+              const isSelected = selectedOptions.some((s) => s.toLowerCase() === opt.toLowerCase());
               return (
                 <button
                   key={opt}
