@@ -2,9 +2,11 @@
 FROM node:20-slim AS builder
 WORKDIR /app
 
-# Copy package descriptors and node_modules pre-installed on the host
+# Copy package descriptors and install dependencies
 COPY package*.json ./
-COPY node_modules ./node_modules
+RUN npm ci
+
+# Copy the rest of the source code
 COPY . .
 
 # Disable telemetry during the build
