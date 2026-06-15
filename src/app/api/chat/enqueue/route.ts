@@ -71,7 +71,22 @@ async function extractLeadInfo(chatHistoryText: string): Promise<any> {
     generationConfig: {
       temperature: 0.1, // low temperature for high extraction fidelity
       maxOutputTokens: 512,
-      responseMimeType: "application/json" // Use JSON response type
+      responseMimeType: "application/json", // Use JSON response type
+      responseSchema: {
+        type: "OBJECT",
+        properties: {
+          name: { type: "STRING" },
+          phone_number: { type: "STRING" },
+          age: { type: "INTEGER" },
+          gender: { type: "STRING" },
+          health_goal: { type: "STRING" },
+          conditions: {
+            type: "ARRAY",
+            items: { type: "STRING" }
+          },
+          program: { type: "STRING" }
+        }
+      }
     }
   };
 

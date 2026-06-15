@@ -15,6 +15,7 @@ export type AnalyticsEvent =
   | 'voice_recording_completed'
   | 'voice_session_started'
   | 'voice_session_ended'
+  | 'voice_session_timeout'
   | 'upload_clicked'
   | 'file_uploaded'
   | 'report_analysis_started'
@@ -96,6 +97,7 @@ export function captureAnalyticsEvent(event: AnalyticsEvent, payload: AnalyticsP
     voice_recording_completed: 'background: #be185d; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;',
     voice_session_started: 'background: #db2777; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; border: 1px solid #be185d;',
     voice_session_ended: 'background: #4b5563; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;',
+    voice_session_timeout: 'background: #f43f5e; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; border: 1px solid #e11d48;',
     upload_clicked: 'background: #06b6d4; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;',
     file_uploaded: 'background: #0891b2; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;',
     report_analysis_started: 'background: #14b8a6; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;',

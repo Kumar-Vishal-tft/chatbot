@@ -11,6 +11,7 @@ import { PersonaContextBuilder } from '@/persona/PersonaContextBuilder';
 import { useChatStore } from '@/store/chatStore';
 import { fetchPredefinedPersona, getOfflineCampaignFocusPrompt } from '@/store/api';
 import { captureAnalyticsEvent } from '@/utils/analytics';
+import { syncConversationWithBackend } from '@/store/utils';
 
 // Types of voice states
 export type VoiceState = 'idle' | 'connecting' | 'listening' | 'paused' | 'thinking' | 'speaking' | 'error';
@@ -63,6 +64,7 @@ export default function VoiceAssistantPanel({
   const userSpeechAccumulatedRef = useRef<string>("");
   const aiSpeechAccumulatedRef = useRef<string>("");
   const sessionStartTimeRef = useRef<number | null>(null);
+  const lastActivityTimeRef = useRef<number>(Date.now());
 
   // Real-time audio amplitude for waveform syncing (0 to 1 scale)
   const [audioVolume, setAudioVolume] = useState(0);
@@ -198,6 +200,11 @@ export default function VoiceAssistantPanel({
           setAudioVolume(Math.min(1.0, rms * 5.0));
         }
 
+        // Reset inactivity timer when user speaks
+        if (rms > 0.005) {
+          lastActivityTimeRef.current = Date.now();
+        }
+
         const u8 = new Uint8Array(pcm16.buffer);
         let binary = '';
         for (let i = 0; i < u8.length; i++) {
@@ -244,7 +251,7 @@ export default function VoiceAssistantPanel({
 
       let historyContext = "";
       if (currentChatMessages.length > 0) {
-        const recentMessages = currentChatMessages.slice(-10);
+        const recentMessages = currentChatMessages.slice(-3);
         historyContext = recentMessages
           .map(m => `[${m.sender === 'user' ? 'User' : 'Assistant'}]: ${m.content}`)
           .join("\n");
@@ -431,6 +438,9 @@ CRITICAL RULES FOR RESPONSES:
           },
 
           onmessage: async (msg: any) => {
+            // Reset inactivity timer on any socket communication
+            lastActivityTimeRef.current = Date.now();
+
             // Handle tool calls from the model
             if (msg.toolCall?.functionCalls) {
               const calls = msg.toolCall.functionCalls;
@@ -537,6 +547,7 @@ CRITICAL RULES FOR RESPONSES:
                         sender: 'assistant' as const,
                         content: confirmationMsg,
                         timestamp,
+                        created_at: Date.now(),
                       };
 
                       useChatStore.setState((state) => {
@@ -558,10 +569,25 @@ CRITICAL RULES FOR RESPONSES:
                             sessionId: sessionUUID,
                             sessions: state.chatSessions,
                             messages: nextMessages,
+                            onboardingStep: 'completed',
+                            onboardingProfile: completeProfile,
+                            userName: completeProfile.name,
+                            isVerified: true,
                           })
                         }).catch(err => console.error('Failed to sync session to backend:', err));
 
-                        return { messages: nextMessages };
+                        // Enqueue voice onboarding confirmation system message in backend Redis
+                        syncConversationWithBackend(nextMessages, activeId).catch((err) =>
+                          console.error('Failed to sync system bot message to enqueue backend:', err)
+                        );
+
+                        return {
+                          messages: nextMessages,
+                          onboardingStep: 'completed',
+                          onboardingProfile: completeProfile,
+                          userName: completeProfile.name,
+                          isVerified: true,
+                        };
                       });
                     }
                   }, 0);
@@ -583,18 +609,26 @@ CRITICAL RULES FOR RESPONSES:
             }
 
             // 3. Process Live Transcriptions
-            // User Speech transcription
-            const userSpeech = msg.inputAudioTranscription?.parts?.[0]?.text;
+            // User Speech transcription (Checking both serverContent and original payload structures)
+            const userSpeech =
+              msg.serverContent?.inputTranscription?.text ||
+              msg.serverContent?.inputTranscription?.parts?.[0]?.text ||
+              msg.inputAudioTranscription?.parts?.[0]?.text;
             if (userSpeech) {
+              console.log("[Voice Assistant] User speech chunk:", userSpeech);
               setTranscript(userSpeech);
-              userSpeechAccumulatedRef.current += userSpeech;
+              userSpeechAccumulatedRef.current += (userSpeech + " ");
             }
 
-            // AI Speech transcription preview
-            const aiSpeech = msg.serverContent?.modelTurn?.parts?.[0]?.text;
+            // AI Speech transcription preview (Checking outputTranscription, modelTurn, and custom parts)
+            const aiSpeech =
+              msg.serverContent?.outputTranscription?.text ||
+              msg.serverContent?.modelTurn?.parts?.[0]?.text ||
+              msg.serverContent?.modelTurn?.parts?.find((p: any) => p.text)?.text;
             if (aiSpeech) {
+              console.log("[Voice Assistant] AI speech chunk:", aiSpeech);
               setTranscript(aiSpeech);
-              aiSpeechAccumulatedRef.current += aiSpeech;
+              aiSpeechAccumulatedRef.current += (aiSpeech + " ");
             }
 
             // If model completes turn, restore listening state
@@ -607,8 +641,93 @@ CRITICAL RULES FOR RESPONSES:
 
               if (inputContent || outputContent) {
                 const store = useChatStore.getState();
-                const activeId = store.activeChatId || store.sessionId || 'voice-session';
+                let activeId = store.activeChatId;
 
+                // Create a new chat session if none exists
+                if (!activeId) {
+                  activeId = store.createNewChat();
+                }
+
+                if (activeId) {
+                  const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                  const newMsgs: any[] = [];
+
+                  if (inputContent) {
+                    newMsgs.push({
+                      id: Math.random().toString(36).substring(7),
+                      sender: 'user' as const,
+                      content: inputContent,
+                      timestamp,
+                      created_at: Date.now()
+                    });
+                  }
+
+                  if (outputContent) {
+                    newMsgs.push({
+                      id: Math.random().toString(36).substring(7),
+                      sender: 'assistant' as const,
+                      content: outputContent,
+                      timestamp,
+                      created_at: Date.now()
+                    });
+                  }
+
+                  if (newMsgs.length > 0) {
+                    useChatStore.setState((state) => {
+                      const nextMessages = {
+                        ...state.messages,
+                        [activeId!]: [...(state.messages[activeId!] || []), ...newMsgs]
+                      };
+
+                      // Update title if this is the first message in the session
+                      const sessionMsgCount = state.messages[activeId!]?.length || 0;
+                      let nextSessions = state.chatSessions;
+                      if (sessionMsgCount === 0 && inputContent) {
+                        const titleText = `Voice: ${inputContent}`;
+                        nextSessions = state.chatSessions.map((s) =>
+                          s.id === activeId
+                            ? { ...s, title: titleText.length > 25 ? titleText.substring(0, 25) + '...' : titleText }
+                            : s
+                        );
+                      }
+
+                      // Save to localStorage
+                      if (typeof window !== 'undefined') {
+                        localStorage.setItem('yhealth_chats_v1', JSON.stringify(nextMessages));
+                        if (sessionMsgCount === 0 && inputContent) {
+                          localStorage.setItem('yhealth_sessions_v1', JSON.stringify(nextSessions));
+                        }
+                      }
+
+                      // Sync session database
+                      const sessionUUID = state.sessionId || activeId || '';
+                      fetch('/api/session/save', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                          sessionId: sessionUUID,
+                          sessions: nextSessions,
+                          messages: nextMessages,
+                          onboardingStep: state.onboardingStep,
+                          onboardingProfile: state.onboardingProfile,
+                          userName: state.userName,
+                          isVerified: state.isVerified,
+                        })
+                      }).catch(err => console.error('Failed to sync voice transcript messages to backend:', err));
+
+                      // Enqueue voice transcripts to backend Redis database so it triggers CRM sync and keeps active key updated
+                      syncConversationWithBackend(nextMessages, activeId).catch((err) =>
+                        console.error('Failed to sync voice transcripts to enqueue backend:', err)
+                      );
+
+                      return { messages: nextMessages, chatSessions: nextSessions };
+                    });
+                  }
+                }
+
+                // Send trace details to Langfuse
                 fetch('/api/trace', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -618,7 +737,7 @@ CRITICAL RULES FOR RESPONSES:
                     output: outputContent,
                     model: GEMINI_LIVE_MODEL,
                     userId: store.userName || 'anonymous',
-                    sessionId: activeId,
+                    sessionId: activeId || store.sessionId || 'voice-session',
                   })
                 }).catch(err => console.warn('Langfuse voice tracing failed:', err));
               }
@@ -848,6 +967,27 @@ CRITICAL RULES FOR RESPONSES:
       handleCloseSession();
     }
   };
+
+  // Inactivity timeout guard (45 seconds of silence)
+  useEffect(() => {
+    if (!isOpen || state === 'idle' || state === 'connecting' || state === 'error') {
+      return;
+    }
+
+    // Initialize/reset activity time when entering active state
+    lastActivityTimeRef.current = Date.now();
+
+    const interval = setInterval(() => {
+      const inactiveMs = Date.now() - lastActivityTimeRef.current;
+      if (inactiveMs >= 45000) {
+        console.log("Voice session timed out due to 45 seconds of inactivity.");
+        captureAnalyticsEvent('voice_session_timeout');
+        handleCloseSession();
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isOpen, state, handleCloseSession]);
 
   if (!isOpen) return null;
 
