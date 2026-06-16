@@ -447,7 +447,7 @@ Strict rules:
 7. Every response must end with exactly 3 quick action chips in this exact format on its own line:
    [FollowUps: Suggestion 1 | Suggestion 2 | Suggestion 3]
    - If an active clinical patient profile is loaded (hasPersona is true), these suggestions MUST be directly clinical and highly personalized to their actual conditions and risks:
-     * For Type 1 Diabetes (Lisha Karar), suggest actions like: "Review glucose spikes", "Dairy/Egg free recipes", "Endocrinology help".
+     * For Type 1 Diabetes, suggest actions like: "Review glucose spikes", "Dairy/Egg free recipes", "Endocrinology help".
      * Make sure these suggestions feel helpful, professional, and clinical.
    - If no patient profile is loaded, use standard general action chips: "Check Symptoms", "Analyze Report", "Diet Guidance", "Medicine Help".
 8. Make each return greeting feel slightly different — avoid robotic repetition.
@@ -561,11 +561,30 @@ export async function verifyUserData(
     }
 
     const data = await response.json();
+    let isValid = data.valid === true;
+    let parsedValue = data.normalized || '';
+    let errorMessage = data.reason && data.reason !== 'health_question' ? data.reason : undefined;
+
+    if (isValid && parsedValue) {
+      const isPhoneStep = step === 'asked_phone' || String(step).toLowerCase().includes('phone');
+      if (isPhoneStep) {
+        const clean = parsedValue.replace(/[-\s]/g, '');
+        const isPhoneValid = clean.startsWith('+') 
+          ? /^\d{10,15}$/.test(clean.slice(1))
+          : /^(?:0|91)?[6-9]\d{9}$/.test(clean);
+        if (!isPhoneValid) {
+          isValid = false;
+          parsedValue = '';
+          errorMessage = 'Phone number must be 10 digits starting with 6-9 or international format.';
+        }
+      }
+    }
+
     return {
-      isValid: data.valid === true,
-      parsedValue: data.normalized || '',
+      isValid,
+      parsedValue,
       isQuestionOrQuery: data.reason === 'health_question',
-      errorMessage: data.reason && data.reason !== 'health_question' ? data.reason : undefined
+      errorMessage
     };
   } catch (error: any) {
     clearTimeout(timeoutId);
@@ -712,7 +731,7 @@ export async function extractOnboardingEntities(
     const response = await fetch('/api/extract', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: content }),
+      body: JSON.stringify({ text: content, currentStep }),
       signal: controller.signal
     });
     clearTimeout(timeoutId);
@@ -731,7 +750,17 @@ export async function extractOnboardingEntities(
         if (ext.gender?.valid && ext.gender.value) res.gender = ext.gender.value;
         else if (ext.gender?.reason) errors.gender = ext.gender.reason;
 
-        if (ext.phone_number?.valid && ext.phone_number.value) res.phone_number = ext.phone_number.value;
+        if (ext.phone_number?.valid && ext.phone_number.value) {
+          const cleanPhone = ext.phone_number.value.replace(/[-\s]/g, '');
+          const isPhoneValid = cleanPhone.startsWith('+') 
+            ? /^\d{10,15}$/.test(cleanPhone.slice(1))
+            : /^(?:0|91)?[6-9]\d{9}$/.test(cleanPhone);
+          if (isPhoneValid) {
+            res.phone_number = cleanPhone;
+          } else {
+            errors.phone_number = 'Phone number must be 10 digits starting with 6-9 or international format.';
+          }
+        }
         else if (ext.phone_number?.reason) errors.phone_number = ext.phone_number.reason;
 
         if (ext.health_goal?.valid && ext.health_goal.value) res.health_goal = ext.health_goal.value;
@@ -804,7 +833,10 @@ export async function extractOnboardingEntities(
     const phoneMatch = content.replace(/[-\s]/g, '').match(/\+?\d{10,15}/);
     if (phoneMatch) {
       const p = phoneMatch[0];
-      if (p.startsWith('+') || (p.length === 10 && /^[6-9]/.test(p))) {
+      const isPhoneValid = p.startsWith('+') 
+        ? /^\d{10,15}$/.test(p.slice(1))
+        : /^(?:0|91)?[6-9]\d{9}$/.test(p);
+      if (isPhoneValid) {
         res.phone_number = p;
       }
     }
@@ -854,6 +886,30 @@ export async function extractOnboardingEntities(
       res.feeling_note = content.trim();
     }
   }
+
+  if (currentStep === 'asked_name' && !res.name && !errors.name) {
+    errors.name = 'Please enter a valid first name (minimum 2 letters, no numbers or symbols).';
+  } else if (currentStep === 'asked_age' && !res.age && !errors.age) {
+    errors.age = 'Age must be between 5 and 110.';
+  } else if (currentStep === 'asked_gender' && !res.gender && !errors.gender) {
+    errors.gender = 'Please select Male, Female, or Prefer not to say.';
+  } else if (currentStep === 'asked_phone' && !res.phone_number && !errors.phone_number) {
+    errors.phone_number = 'Phone number must be 10 digits starting with 6-9 or international format.';
+  } else if (currentStep === 'asked_goal' && !res.health_goal && !errors.health_goal) {
+    errors.health_goal = 'Please enter a valid health goal.';
+  } else if (currentStep === 'asked_conditions' && !res.conditions && !errors.conditions) {
+    errors.conditions = 'Please select or enter a condition, or choose None.';
+  } else if (currentStep === 'asked_feeling' && !res.feeling_note && !errors.feeling_note) {
+    errors.feeling_note = 'Please enter a brief note on how you are feeling (2-500 characters).';
+  }
+
+  if (res.name) delete errors.name;
+  if (res.age) delete errors.age;
+  if (res.gender) delete errors.gender;
+  if (res.phone_number) delete errors.phone_number;
+  if (res.health_goal) delete errors.health_goal;
+  if (res.conditions) delete errors.conditions;
+  if (res.feeling_note) delete errors.feeling_note;
 
   if (Object.keys(errors).length > 0) res.errors = errors;
   return res;

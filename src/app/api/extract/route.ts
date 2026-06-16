@@ -4,7 +4,7 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEM
 
 export async function POST(request: NextRequest) {
   try {
-    const { text } = await request.json();
+    const { text, currentStep } = await request.json();
     if (typeof text !== 'string') {
       return NextResponse.json({ success: false, reason: 'Invalid parameters' }, { status: 400 });
     }
@@ -57,8 +57,15 @@ Output JSON must follow this schema exactly:
     "feeling_note": { "valid": boolean, "value": string | null, "reason": string }
   }
 }
-If an entity is not mentioned or cannot be found in the text, set its "valid" to false, "value" to null, and "reason" to "".
+CRITICAL: If an entity is NOT mentioned in the text, you MUST set its "valid" to false, "value" to null, and "reason" to "" (empty string). Do NOT output validation messages for missing or unmentioned fields.
 Your output must be a clean JSON object. Do not include markdown formatting or preamble.`;
+
+    let contextHint = '';
+    if (currentStep) {
+      const stepName = currentStep.toLowerCase().replace('asked_', '');
+      contextHint = `\nContext Hint: The user is currently answering the prompt for the field "${stepName}". If the user's input is a simple/short response (e.g. just a number like "99", "male", "diabetes", or "none"), you MUST treat it as the value for the "${stepName}" attribute.`;
+    }
+    const fullSystemInstruction = `${systemInstruction}${contextHint}`;
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
     const response = await fetch(url, {
@@ -66,7 +73,7 @@ Your output must be a clean JSON object. Do not include markdown formatting or p
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text }] }],
-        systemInstruction: { parts: [{ text: systemInstruction }] },
+        systemInstruction: { parts: [{ text: fullSystemInstruction }] },
         generationConfig: {
           temperature: 0.1,
           responseMimeType: 'application/json',

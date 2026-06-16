@@ -346,7 +346,7 @@ CRITICAL RULES FOR RESPONSES:
 3. Suggest consulting ${doctorName} (${doctorSpecialization}) when relevant.
 4. Be supportive and acknowledge their efforts, emphasizing low-glycemic eating, physical activity, and stress reduction as suitable to their history.
 5. If they ask about their doctor, mention ${doctorName} as their ${doctorSpecialization} lead.
-6. Address the patient warmly by their name (e.g. ${rawPersona?.identity?.first_name || 'Lisha'}).`;
+6. Address the patient warmly by their name${rawPersona?.identity?.first_name ? ` (e.g. ${rawPersona.identity.first_name})` : ''}.`;
       } else {
         // Guest user who finished onboarding but has no custom persona yet
         voiceSystemInstruction = `${YHEALTH_PERSONA}

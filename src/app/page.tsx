@@ -417,7 +417,7 @@ export default function Home() {
                         <ShieldCheck className="w-3.5 h-3.5" /> HIPAA Clinical File Restored
                       </span>
                       <h2 className="text-2xl font-extrabold text-[#111111] dark:text-white mt-2.5">
-                        Welcome back, {userName}
+                        Welcome back{userName ? `, ${userName}` : ''}
                       </h2>
                       <p className="text-xs text-[#666666] dark:text-[#8a8a8a] mt-1 leading-relaxed">
                         {clinicalDescription}

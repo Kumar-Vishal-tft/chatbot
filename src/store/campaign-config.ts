@@ -22,7 +22,7 @@ export const CAMPAIGN_CONFIG: Record<string, CampaignDetail> = {
     heroTagline: "YOUR AI DIABETES COACH",
     programDescription: "Your warm AI companion for diabetes reversal and preventive wellness.",
     ctaText: "Book Diabetes Consultation",
-    welcomeTemplate: (name) => `Hi ${name}.\n\nI can see you're managing Type 1 Diabetes.\n\nI can help you understand glucose trends, nutrition choices, HbA1c patterns, and diabetes management strategies.`,
+    welcomeTemplate: (name) => `Hi${name ? ` ${name}` : ''}.\n\nI can see you're managing Type 1 Diabetes.\n\nI can help you understand glucose trends, nutrition choices, HbA1c patterns, and diabetes management strategies.`,
     suggestedPrompts: [
       "Why is my glucose high?",
       "Analyze my HbA1c",
@@ -42,7 +42,7 @@ export const CAMPAIGN_CONFIG: Record<string, CampaignDetail> = {
     heroTagline: "YOUR AI HEART HEALTH COACH",
     programDescription: "Your warm AI companion for blood pressure control and cardiovascular wellness.",
     ctaText: "Talk to Heart Specialist",
-    welcomeTemplate: (name) => `Hi ${name}.\n\nI can help you understand blood pressure trends, lifestyle factors, and heart health recommendations.`,
+    welcomeTemplate: (name) => `Hi${name ? ` ${name}` : ''}.\n\nI can help you understand blood pressure trends, lifestyle factors, and heart health recommendations.`,
     suggestedPrompts: [
       "How can I lower BP?",
       "Heart healthy diet",
@@ -62,7 +62,7 @@ export const CAMPAIGN_CONFIG: Record<string, CampaignDetail> = {
     heroTagline: "YOUR AI WEIGHT LOSS COACH",
     programDescription: "Your warm AI companion for weight loss and metabolic optimization.",
     ctaText: "Schedule Weight Coach Call",
-    welcomeTemplate: (name) => `Hi ${name}.\n\nLet's create a sustainable weight loss plan based on your goals, nutrition habits, and activity levels.`,
+    welcomeTemplate: (name) => `Hi${name ? ` ${name}` : ''}.\n\nLet's create a sustainable weight loss plan based on your goals, nutrition habits, and activity levels.`,
     suggestedPrompts: [
       "Calculate calorie deficit",
       "Create weight loss plan",
@@ -82,7 +82,7 @@ export const CAMPAIGN_CONFIG: Record<string, CampaignDetail> = {
     heroTagline: "YOUR AI METABOLIC HEALTH COACH",
     programDescription: "Your warm AI companion for metabolic and preventive wellness.",
     ctaText: "Schedule Health Coach Call",
-    welcomeTemplate: (name) => `Hi ${name}.\n\nLet's discuss your metabolic health goals, lifestyle optimization, and preventive wellness strategies.`,
+    welcomeTemplate: (name) => `Hi${name ? ` ${name}` : ''}.\n\nLet's discuss your metabolic health goals, lifestyle optimization, and preventive wellness strategies.`,
     suggestedPrompts: [
       "Improve metabolic rate",
       "Balance energy levels",
@@ -102,7 +102,7 @@ export const CAMPAIGN_CONFIG: Record<string, CampaignDetail> = {
     heroTagline: "YOUR AI HEALTH ASSISTANT",
     programDescription: "Your warm AI companion for general health and preventive wellness.",
     ctaText: "Schedule Consultation",
-    welcomeTemplate: (name) => `Hi ${name}.\n\nI am your YHealth AI Assistant. I can help you understand symptoms, analyze lab report markers, suggest balanced meal plans, or calculate nutrition goals.`,
+    welcomeTemplate: (name) => `Hi${name ? ` ${name}` : ''}.\n\nI am your YHealth AI Assistant. I can help you understand symptoms, analyze lab report markers, suggest balanced meal plans, or calculate nutrition goals.`,
     suggestedPrompts: [
       "Analyze my blood report",
       "Explain my symptoms",

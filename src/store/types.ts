@@ -66,6 +66,8 @@ export interface ChatState {
   streamingMessageId: string | null;
   activeIntervalId: any | null;
   searchQuery: string;
+  messageQueue: string[];
+  isProcessingQueue: boolean;
 
   // Onboarding States
   onboardingProfile: OnboardingProfile;

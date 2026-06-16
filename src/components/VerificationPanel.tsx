@@ -286,7 +286,7 @@ export default function VerificationPanel({ onVerified, onClose }: VerificationP
         fetchedPersona = data.persona;
         const finalName = fetchedPersona?.identity?.first_name
           ? `${fetchedPersona.identity.first_name} ${fetchedPersona.identity.last_name || ''}`.trim()
-          : 'Lisha Karar';
+          : '';
         setVerifiedPatientName(finalName);
 
         // Success transition
@@ -296,7 +296,7 @@ export default function VerificationPanel({ onVerified, onClose }: VerificationP
           setTimeout(() => {
             onVerified({
               name: finalName,
-              phone: phone || fetchedPersona?.identity?.phone || '+91 87778 46383',
+              phone: phone || fetchedPersona?.identity?.phone || '',
               persona: fetchedPersona,
               session_id: data.session_id
             });
