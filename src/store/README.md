@@ -130,7 +130,7 @@ All **network calls to Google Gemini** live here. Two exported functions:
 
 #### `fetchGeminiResponse(prompt, history, profile?)`
 
-Calls Gemini `gemini-2.5-flash` model to generate a clinical health response.
+Calls Gemini `gemini-2.5-flash-lite` model to generate a clinical health response.
 
 ```
 User sends message
@@ -139,7 +139,7 @@ User sends message
 Map chat history → Gemini format (role: 'user' | 'model')
     │
     ▼
-POST https://generativelanguage.googleapis.com/.../gemini-2.5-flash:generateContent
+POST https://generativelanguage.googleapis.com/.../gemini-2.5-flash-lite:generateContent
     │
     ▼
 Extract text from candidates[0].content.parts[0].text

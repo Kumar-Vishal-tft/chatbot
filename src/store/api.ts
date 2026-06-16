@@ -27,7 +27,7 @@ function getSimpleHash(str: string): string {
  * Creates or retrieves an existing Gemini Context Cache for a given system instruction.
  * Returns the full resource name (cacheName) if successful, or null if caching failed/was skipped.
  */
-export async function getOrCreateGeminiCache(systemInstruction: string, model: string = 'models/gemini-2.5-flash'): Promise<string | null> {
+export async function getOrCreateGeminiCache(systemInstruction: string, model: string = 'models/gemini-2.5-flash-lite'): Promise<string | null> {
   if (!GEMINI_API_KEY) {
     return null;
   }
@@ -242,10 +242,10 @@ Remember: Be warm, clear, and genuinely helpful. Always recommend seeing a docto
   mappedHistory.push({ role: 'user', parts: [{ text: prompt }] });
 
   // Attempt to load or create a Gemini context cache for the system instructions
-  const cacheName = await getOrCreateGeminiCache(systemInstruction, 'models/gemini-2.5-flash');
+  const cacheName = await getOrCreateGeminiCache(systemInstruction, 'models/gemini-2.5-flash-lite');
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
 
     const requestBody: any = {
       contents: mappedHistory,
@@ -385,7 +385,7 @@ Use standard Markdown formatting (lists, bolding, headers, tables, strategic ale
           name: 'chat-response',
           input: prompt,
           output: trimmed,
-          model: 'gemini-2.5-flash',
+          model: 'gemini-2.5-flash-lite',
           userId: profile?.name || 'anonymous',
           sessionId: activeChatId || undefined,
           usageMetadata: data.usageMetadata
@@ -465,10 +465,10 @@ Strict rules:
   mappedHistory.push({ role: 'user', parts: [{ text: userInput }] });
 
   // Attempt to load or create a Gemini context cache for the system instructions
-  const cacheName = await getOrCreateGeminiCache(systemInstruction, 'models/gemini-2.5-flash');
+  const cacheName = await getOrCreateGeminiCache(systemInstruction, 'models/gemini-2.5-flash-lite');
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
 
     const requestBody: any = {
       contents: mappedHistory,
@@ -508,7 +508,7 @@ Strict rules:
           name: 'greeting-response',
           input: userInput,
           output: trimmed,
-          model: 'gemini-2.5-flash',
+          model: 'gemini-2.5-flash-lite',
           userId: userName || 'anonymous',
           sessionId: activeChatId || undefined,
           usageMetadata: data.usageMetadata
