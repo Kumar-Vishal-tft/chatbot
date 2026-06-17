@@ -326,7 +326,8 @@ CRITICAL INSTRUCTIONS:
 2. Be extremely conversational, friendly, and brief (1-2 sentences per turn). Ask for one missing detail at a time. Do NOT list all questions at once.
 3. If the user asks general health questions during onboarding, answer them briefly (1-2 sentences) and gently pivot back to collecting the missing details.
 4. Once you have collected all details, call the "submitLeadProfile" tool to save and register their profile.
-5. After calling the tool, warmly welcome them to YHealth and say that their health profile is now complete.`;
+5. After calling the tool, warmly welcome them to YHealth and say that their health profile is now complete.
+6. PHONE NUMBER VALIDATION (CRITICAL): When collecting the phone number, you MUST verify it is exactly 10 digits (Indian mobile format, e.g. 9876543210). If the user provides fewer or more than 10 digits, or says something unclear, you MUST politely tell them the number is invalid and ask them to repeat their 10-digit mobile number. Do NOT call submitLeadProfile until phone_number is a valid 10-digit number. Never accept country codes like +91 or 0 prefix — strip those and confirm only the 10 core digits.`;
       } else if (hasPersona) {
         const rawPersona = activePersonaManager.getRawPersona();
         const doctorName = rawPersona?.care_team?.assigned_doctor?.name 
@@ -447,7 +448,41 @@ CRITICAL RULES FOR RESPONSES:
               for (const call of calls) {
                 if (call.name === 'submitLeadProfile') {
                   const args = call.args || {};
-                  
+
+                  // ── Phone number validation ────────────────────────────────────────────
+                  // Strip spaces, dashes, brackets, plus signs, then remove leading 91/0
+                  const rawPhone = String(args.phone_number || '').replace(/[\s\-\+\(\)]/g, '');
+                  const normalizedPhone = /^(91|0)/.test(rawPhone) && rawPhone.length > 10
+                    ? rawPhone.replace(/^(91|0)/, '')
+                    : rawPhone;
+                  const isValidPhone = /^[6-9]\d{9}$/.test(normalizedPhone);
+
+                  if (!isValidPhone) {
+                    console.warn('[Voice] submitLeadProfile rejected — invalid phone:', args.phone_number);
+                    // Send a failure tool response so Gemini re-asks for a valid number
+                    sessionPromise.then(session => {
+                      try {
+                        session.sendToolResponse({
+                          functionResponses: [{
+                            id: call.id,
+                            name: call.name,
+                            response: {
+                              success: false,
+                              error: 'invalid_phone_number',
+                              message: `The phone number "${args.phone_number || '(none)'}" is not a valid 10-digit Indian mobile number. Please apologise briefly and ask the user to repeat their correct 10-digit mobile number (starting with 6, 7, 8, or 9).`
+                            }
+                          }]
+                        });
+                      } catch (e) {
+                        console.error('Failed to send phone validation error tool response:', e);
+                      }
+                    });
+                    return; // Do NOT proceed with lead submission
+                  }
+
+                  // Normalise phone for storage (always 10 digits, no country code)
+                  args.phone_number = normalizedPhone;
+
                   // 1. Immediately send function response back to Gemini Live socket to avoid any delay
                   sessionPromise.then(session => {
                     try {
@@ -488,24 +523,34 @@ CRITICAL RULES FOR RESPONSES:
                       method: 'POST',
                       headers: {
                         'Content-Type': 'application/json',
+                        'accept': 'application/json',
                       },
                       body: JSON.stringify({
                         session_id: sessionUUID,
                         name: completeProfile.name,
                         age: ageNum,
                         phone_number: completeProfile.phone_number,
+                        email: '',
                         gender: completeProfile.gender,
+                        consent: true,
+                        lead_status: 'New',
+                        health_goal: completeProfile.health_goal || 'General wellness',
+                        utm_source: store.utm_source || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_source') : null) || '',
+                        utm_medium: store.utm_medium || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_medium') : null) || '',
+                        utm_campaign: store.utm_campaign || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_campaign') : null) || 'default',
+                        utm_term: store.utm_term || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_term') : null) || '',
+                        utm_content: store.utm_content || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_content') : null) || '',
                         additional_details: {
-                          health_goal: completeProfile.health_goal,
-                          conditions: completeProfile.conditions,
-                          feeling_note: completeProfile.feeling_note,
-                          utm_campaign: store.utm_campaign || sessionStorage.getItem('utm_campaign') || 'default',
-                        }
+                          conditions: completeProfile.conditions || [],
+                          feeling_note: completeProfile.feeling_note || '',
+                        },
                       })
                     })
                     .then(async (res) => {
                       if (res.ok) {
                         console.log('Lead captured via Voice and sent to backend successfully:', await res.json());
+                      } else {
+                        console.warn('Voice lead submission failed:', res.status, await res.text());
                       }
                     })
                     .catch(err => {

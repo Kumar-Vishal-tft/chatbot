@@ -61,6 +61,16 @@ src/app/
 │
 └── api/                # Next.js API routes (server-side only)
     │
+    ├── abuse/
+    │   └── route.ts                # GET  — Checks if a session is currently blocked
+    │                               #          (returns blocked, reason, remainingSeconds).
+    │                               # POST — Abuse detection middleware backed by Redis.
+    │                               #          Detects profane language (word-list match)
+    │                               #          and message repetition (≥4 identical msgs).
+    │                               #          Blocks offending sessions for 15 min (900s)
+    │                               #          after 3 abuse strikes or 4 repetitions.
+    │                               #          Counters reset on block; 24 h TTL otherwise.
+    │
     ├── agent/
     │   └── query/route.ts          # POST — Proxies natural language queries to
     │                               #   the FastAPI MongoDB Agent backend.
@@ -74,7 +84,13 @@ src/app/
     │   ├── enqueue/route.ts        # POST — Stores chat messages in Redis lists;
     │                               #   runs lead extraction via Gemini JSON mode;
     │                               #   auto-submits qualified leads to backend.
-    │   ├── sessions/route.ts       # GET  — Retrieves all sessions for a user
+    │   ├── sessions/
+    │   │   └── [sessionId]/
+    │   │       └── messages/
+    │   │           └── route.ts    # GET  — Paginated proxy to backend for fetching
+    │   │                           #         a session's message history.
+    │   │                           #         Params: limit (default 100), offset (default 0).
+    │   │                           #         Transparently forwards backend HTTP status.
     │   └── sync-messages/route.ts  # POST — Batch syncs messages from Redis → backend
     │
     ├── extract/route.ts            # POST — LLM-powered entity extraction for onboarding
@@ -226,10 +242,16 @@ src/store/
 │                        #     validateAndNormalizePhone() — Shared phone validator
 │
 ├── campaign-config.ts   # Campaign branding config keyed by utm_campaign
-│                        #   Controls: app name, CTA button labels,
-│                        #   suggested prompt pills, feature flags.
-│                        #   Campaigns: diabetes_reversal, bp_control,
-│                        #             weight_loss, default
+│                        #   Exports: CampaignDetail, ProgramCard interfaces
+│                        #           and the CAMPAIGN_CONFIG record.
+│                        #   Controls per-campaign: heroTagline, programDescription,
+│                        #   ctaText, welcomeTemplate, suggestedPrompts, cards.
+│                        #   Campaigns:
+│                        #     diabetes_reversal — Diabetes coach (HbA1c, CGM)
+│                        #     bp_control        — Heart health / hypertension coach
+│                        #     weight_loss        — Weight loss & metabolic optimisation
+│                        #     metabolic_health   — Metabolic & preventive wellness coach
+│                        #     default            — General health assistant
 │
 ├── config.ts            # Environment variable exports (GEMINI_API_KEY, etc.)
 │

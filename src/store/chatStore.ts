@@ -225,23 +225,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'accept': 'application/json',
         },
         body: JSON.stringify({
           session_id: sessionUUID,
           name: onboardingProfile.name || '',
           age: ageNum,
           phone_number: onboardingProfile.phone_number || '',
+          email: '',
           gender: onboardingProfile.gender || '',
+          consent: true,
+          lead_status: 'New',
+          health_goal: onboardingProfile.health_goal || 'Skipped',
+          utm_source: get().utm_source || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_source') : null) || '',
+          utm_medium: get().utm_medium || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_medium') : null) || '',
+          utm_campaign: get().utm_campaign || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_campaign') : null) || 'default',
+          utm_term: get().utm_term || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_term') : null) || '',
+          utm_content: get().utm_content || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_content') : null) || '',
           additional_details: {
-            health_goal: onboardingProfile.health_goal || 'Skipped',
             conditions: onboardingProfile.conditions || [],
             feeling_note: onboardingProfile.feeling_note || 'Skipped',
-            utm_campaign: get().utm_campaign || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_campaign') : null) || 'default',
-            utm_source: get().utm_source || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_source') : null),
-            utm_medium: get().utm_medium || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_medium') : null),
-            utm_content: get().utm_content || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_content') : null),
-            utm_term: get().utm_term || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_term') : null),
-          }
+          },
         })
       });
 
@@ -759,23 +763,27 @@ Could you rephrase that? Try something like:
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
+              'accept': 'application/json',
             },
             body: JSON.stringify({
               session_id: sessionUUID,
               name: nextProfile.name || '',
               age: ageNum,
               phone_number: nextProfile.phone_number || '',
+              email: '',
               gender: nextProfile.gender || '',
+              consent: true,
+              lead_status: 'New',
+              health_goal: nextProfile.health_goal || 'General wellness',
+              utm_source: get().utm_source || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_source') : null) || '',
+              utm_medium: get().utm_medium || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_medium') : null) || '',
+              utm_campaign: get().utm_campaign || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_campaign') : null) || 'default',
+              utm_term: get().utm_term || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_term') : null) || '',
+              utm_content: get().utm_content || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_content') : null) || '',
               additional_details: {
-                health_goal: nextProfile.health_goal || 'General wellness',
                 conditions: nextProfile.conditions || [],
                 feeling_note: nextProfile.feeling_note || '',
-                utm_campaign: get().utm_campaign || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_campaign') : null) || 'default',
-                utm_source: get().utm_source || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_source') : null),
-                utm_medium: get().utm_medium || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_medium') : null),
-                utm_content: get().utm_content || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_content') : null),
-                utm_term: get().utm_term || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_term') : null),
-              }
+              },
             })
           })
             .then(async (res) => {
