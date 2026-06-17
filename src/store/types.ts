@@ -86,10 +86,18 @@ export interface ChatState {
   utm_term?: string | null;
   isProgramActivated?: boolean;
   isRestoring?: boolean;
+  isAbuseBlocked: boolean;
+  abuseRemainingSeconds: number;
+  abuseBlockReason: 'abuse' | 'repetition' | null;
 
   // Conversation State
   greetingShown: boolean;           // true after first welcome message is displayed
   lastBotMessageType: LastBotMessageType; // prevents duplicate greetings/questions
+
+  // Actions
+  setAbuseBlocked: (blocked: boolean, remainingSeconds?: number, reason?: 'abuse' | 'repetition' | null) => void;
+  checkAbuseStatus: () => Promise<void>;
+  startAbuseTimer: () => void;
 
   // Actions
   setTheme: (theme: 'light' | 'dark') => void;

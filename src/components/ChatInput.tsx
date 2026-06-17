@@ -100,9 +100,9 @@ interface ChatInputProps {
 }
 
 export default function ChatInput({ disabled: externalDisabled = false, onAttachClick, onVerify }: ChatInputProps) {
-  const { sendMessage, isTyping, streamingMessageId, stopStreaming, onboardingStep, isExistingPatient, isVerified } = useChatStore();
+  const { sendMessage, isTyping, streamingMessageId, stopStreaming, onboardingStep, isExistingPatient, isVerified, isAbuseBlocked, abuseRemainingSeconds, checkAbuseStatus, sessionId, abuseBlockReason } = useChatStore();
   const isAIResponding = isTyping || streamingMessageId !== null;
-  const isDisabled = externalDisabled || isAIResponding;
+  const isDisabled = externalDisabled || isAIResponding || isAbuseBlocked;
 
   const [text, setText]           = useState('');
   const [isFocused, setIsFocused] = useState(false);
@@ -180,10 +180,19 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
     }
   }, [text]);
 
-  // Auto-focus on mount
+  // Check abuse status when sessionId becomes available/changes (e.g. after loading persisted chats)
   useEffect(() => {
-    textareaRef.current?.focus();
-  }, []);
+    if (sessionId) {
+      checkAbuseStatus();
+    }
+  }, [sessionId, checkAbuseStatus]);
+
+  // Auto-focus when not blocked
+  useEffect(() => {
+    if (!isAbuseBlocked) {
+      textareaRef.current?.focus();
+    }
+  }, [isAbuseBlocked]);
 
   // Re-focus after AI response completes entirely (typewriter + fetch)
   const prevIsAIResponding = useRef(false);
@@ -239,8 +248,50 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
     }
   };
 
+  // Format remaining seconds as mm:ss
+  const formatCountdown = (secs: number) => {
+    const m = Math.floor(secs / 60).toString().padStart(2, '0');
+    const s = (secs % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
+
   return (
     <div className="w-full bg-gradient-to-t from-white/90 via-white/40 to-transparent dark:from-[#0a0a0a]/90 dark:via-[#0a0a0a]/40 dark:to-transparent pt-6 pb-4 px-4">
+      {/* ── Abuse Block Banner ─────────────────────────────────────── */}
+      {isAbuseBlocked && (
+        <div className="w-full max-w-[860px] mx-auto mb-3 flex items-center justify-between gap-3 px-4 py-3
+          bg-red-50/95 dark:bg-red-950/60
+          border border-red-200/80 dark:border-red-500/30
+          rounded-2xl backdrop-blur-md shadow-sm animate-fade-in select-none"
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="flex-shrink-0 w-8 h-8 rounded-full bg-red-100 dark:bg-red-900/50 flex items-center justify-center">
+              <Lock className="w-4 h-4 text-red-500 dark:text-red-400" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-extrabold text-red-600 dark:text-red-400 uppercase tracking-wide">
+                Message field locked
+              </p>
+              <p className="text-[11px] text-red-500/80 dark:text-red-400/70 mt-0.5 leading-snug">
+                {abuseBlockReason === 'repetition'
+                  ? 'Duplicate messages were detected. You can send messages again after the cooldown.'
+                  : 'Abusive language was detected. You can send messages again after the cooldown.'}
+              </p>
+            </div>
+          </div>
+          <div className="flex-shrink-0 flex flex-col items-center justify-center px-3 py-1.5
+            bg-red-100/80 dark:bg-red-900/40
+            border border-red-200/60 dark:border-red-500/20
+            rounded-xl min-w-[62px]"
+          >
+            <span className="text-[10px] font-bold text-red-400 dark:text-red-500 uppercase tracking-wider">Unlocks in</span>
+            <span className="text-lg font-black text-red-600 dark:text-red-400 tabular-nums leading-tight">
+              {formatCountdown(abuseRemainingSeconds)}
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Onboarding bottom prompt helper banner */}
       {onboardingStep !== 'completed' && onboardingStep !== 'not_started' && (
         <div className="w-full max-w-[860px] mx-auto mb-3 flex items-center justify-between px-4 py-2.5 

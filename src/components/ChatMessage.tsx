@@ -96,7 +96,7 @@ const Blockquote = ({ children }: any) => {
 export default function ChatMessage({ sender, content, timestamp, isStreaming }: MessageProps) {
   const isUser = sender === 'user';
   const [copied, setCopied] = useState(false);
-  const { sendMessage, onboardingStep } = useChatStore();
+  const { sendMessage, onboardingStep, userName } = useChatStore();
 
   // Extract custom markup tags before rendering markdown
   const healthCardsRegex = /\[HealthCardsGrid:\s*([^\]]+)\]/;
@@ -139,6 +139,8 @@ export default function ChatMessage({ sender, content, timestamp, isStreaming }:
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const avatarLetter = userName && userName.trim() ? userName.trim().charAt(0).toUpperCase() : 'U';
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -152,7 +154,7 @@ export default function ChatMessage({ sender, content, timestamp, isStreaming }:
         <div className="flex-shrink-0">
           {isUser ? (
             <div className="w-8 h-8 rounded-full bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/15 flex items-center justify-center text-[#111111] dark:text-white font-bold text-xs shadow-sm">
-              V
+              {avatarLetter}
             </div>
           ) : (
             <div className="w-8 h-8 rounded-full bg-black/[0.02] dark:bg-white/[0.04] border border-black/10 dark:border-white/10 flex items-center justify-center text-[#111111] dark:text-white shadow relative overflow-hidden group">

@@ -22,6 +22,8 @@ import { captureAnalyticsEvent } from '@/utils/analytics';
 export { getTimeBasedGreeting, isLikelyGibberish } from './utils';
 export type { Message, ChatSession, OnboardingProfile, OnboardingStep } from './types';
 
+let abuseTimerInterval: NodeJS.Timeout | null = null;
+
 function isUserQueryOrQuestion(content: string): boolean {
   const trimmed = content.trim().toLowerCase();
   const words = trimmed.split(/\s+/);
@@ -42,6 +44,13 @@ function getOnboardingStepQuestion(step: OnboardingStep, profile: OnboardingProf
   const greetingPrefix = hasJustNamed && profile.name
     ? `Nice to meet you, **${profile.name}**! Welcome to YHealth — your personal clinical intelligence assistant.\n\n`
     : '';
+
+  if (step === 'not_started') {
+    // Defensive fallback: treat an unstarted onboarding flow the same as the
+    // first real step (asking for the user's name) so callers can never get
+    // back an empty string here and leave the user with no next question.
+    return getOnboardingStepQuestion('asked_name', profile, isAlsoPrefix, hasJustNamed);
+  }
 
   if (step === 'asked_name') {
     return isAlsoPrefix
@@ -109,6 +118,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   utm_content: null,
   utm_term: null,
   isProgramActivated: false,
+  isAbuseBlocked: false,
+  abuseRemainingSeconds: 0,
+  abuseBlockReason: null,
 
   // ── Conversation State ────────────────────────────────────────────────────
   greetingShown: false,
@@ -142,6 +154,54 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setIsExistingPatient: (isExistingPatient) => set({ isExistingPatient }),
   setIsVerified: (isVerified) => set({ isVerified }),
   setUserName: (userName) => set({ userName }),
+  
+  setAbuseBlocked: (blocked, remainingSeconds = 0, reason = null) => {
+    set({ isAbuseBlocked: blocked, abuseRemainingSeconds: remainingSeconds, abuseBlockReason: reason });
+    if (blocked && remainingSeconds > 0) {
+      get().startAbuseTimer();
+    }
+  },
+
+  checkAbuseStatus: async () => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      const res = await fetch(`/api/abuse?sessionId=${sessionId}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.blocked) {
+          set({
+            isAbuseBlocked: true,
+            abuseRemainingSeconds: data.remainingSeconds,
+            abuseBlockReason: data.reason || 'abuse'
+          });
+          get().startAbuseTimer();
+        } else {
+          set({ isAbuseBlocked: false, abuseRemainingSeconds: 0, abuseBlockReason: null });
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to check abuse status:', err);
+    }
+  },
+
+  startAbuseTimer: () => {
+    if (abuseTimerInterval) {
+      clearInterval(abuseTimerInterval);
+      abuseTimerInterval = null;
+    }
+
+    abuseTimerInterval = setInterval(() => {
+      const remaining = get().abuseRemainingSeconds ?? 0;
+      if (remaining <= 1) {
+        if (abuseTimerInterval) clearInterval(abuseTimerInterval);
+        abuseTimerInterval = null;
+        set({ isAbuseBlocked: false, abuseRemainingSeconds: 0, abuseBlockReason: null });
+      } else {
+        set({ abuseRemainingSeconds: remaining - 1 });
+      }
+    }, 1000);
+  },
   
   skipOnboarding: async () => {
     const { onboardingProfile, sessionId, activeChatId } = get();
@@ -308,6 +368,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // ── Send Message ──────────────────────────────────────────────────────────
   sendMessage: (content) => {
     if (!content.trim()) return;
+    if (get().isAbuseBlocked) return;
     const { activeChatId } = get();
     let chatId = activeChatId;
 
@@ -315,6 +376,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       chatId = get().createNewChat(content);
       return;
     }
+
+    // ── Abuse guard: check content before allowing send ──────────────────
+    const sessionId = get().sessionId || chatId;
+    // Fire abuse check asynchronously; if blocked, we'll add the user message
+    // but inject a block notice and prevent AI call.
+    const abuseCheckPromise = fetch('/api/abuse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, message: content }),
+    }).then((r) => r.json()).catch(() => ({ abusive: false, blocked: false }));
 
     const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const userMessage: Message = {
@@ -370,6 +441,153 @@ export const useChatStore = create<ChatState>((set, get) => ({
       let nextBotMessageType: LastBotMessageType = 'health_reply';
       let nextStep = get().onboardingStep;
       let nextProfile = { ...get().onboardingProfile };
+
+      // ── 0. Abuse & Repetition gate — await the server's verdict ───────────
+      try {
+        const abuseResult = await abuseCheckPromise;
+        if (abuseResult.blocked) {
+          // User has hit 3 violations — lock the input for 15 min
+          get().setAbuseBlocked(true, abuseResult.remainingSeconds ?? 900, abuseResult.repetition ? 'repetition' : 'abuse');
+          
+          if (abuseResult.repetition) {
+            matchedResponse = `I am unable to continue this conversation if you send the same message repeatedly. My purpose is to provide health support and information in a constructive manner.\n\nYour message field has been locked for **15 minutes** due to sending duplicate messages.\n\n[FollowUps: What health concerns can you address? | How can I start a fitness plan? | Let's focus on health]`;
+          } else {
+            matchedResponse = `I am unable to continue this conversation if it involves offensive language. My purpose is to provide health support and information in a respectful manner.\n\nIf you are experiencing distress or have thoughts of harming yourself, please reach out for immediate help. You can contact iCall at **9152987821** (24x7 in India) or speak with your doctor.\n\nYour message field has been locked for **15 minutes**. If you'd like to discuss your health or fitness goals constructively, I am here to help.\n\n[FollowUps: What health concerns can you address? | How can I start a fitness plan? | Let's focus on health]`;
+          }
+          nextBotMessageType = 'error';
+
+          // Stream the block notice and return early — no AI call
+          const assistantMessageId = generateUUIDv7();
+          const assistantMessage: Message = {
+            id: assistantMessageId,
+            sender: 'assistant',
+            content: '',
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            created_at: Date.now(),
+          };
+          set((state) => {
+            const nextMessages = { ...state.messages, [targetChatId]: [...(state.messages[targetChatId] || []), assistantMessage] };
+            saveChatState(state.chatSessions, nextMessages, targetChatId);
+            return { isTyping: false, streamingMessageId: assistantMessageId, messages: nextMessages, lastBotMessageType: nextBotMessageType };
+          });
+          let currentIdx = 0;
+          await new Promise<void>((resolveStream) => {
+            const interval = setInterval(() => {
+              if (currentIdx >= matchedResponse.length) {
+                clearInterval(interval);
+                set({ streamingMessageId: null, activeIntervalId: null });
+                saveChatState(get().chatSessions, get().messages, get().activeChatId);
+                resolveStream();
+              } else {
+                currentIdx += Math.min(Math.floor(Math.random() * 4) + 6, matchedResponse.length - currentIdx);
+                const sliced = matchedResponse.substring(0, currentIdx);
+                set((state) => ({
+                  messages: {
+                    ...state.messages,
+                    [targetChatId]: (state.messages[targetChatId] || []).map((msg) =>
+                      msg.id === assistantMessageId ? { ...msg, content: sliced } : msg
+                    ),
+                  },
+                }));
+              }
+            }, 8);
+            set({ activeIntervalId: interval });
+          });
+          return;
+        }
+
+        if (abuseResult.abusive && !abuseResult.blocked) {
+          // Warn the user — this is violation 1 or 2
+          const remaining = 3 - (abuseResult.count ?? 1);
+          matchedResponse = `I am unable to continue this conversation if it involves offensive language. My purpose is to provide health support and information in a respectful manner.\n\nIf you are experiencing distress or have thoughts of harming yourself, please reach out for immediate help. You can contact iCall at **9152987821** (24x7 in India) or speak with your doctor.\n\nIf you'd like to discuss your health or fitness goals constructively, I am here to help.\n\n> ⚠️ ${remaining} more violation${remaining !== 1 ? 's' : ''} will lock your message field for 15 minutes.\n\n[FollowUps: What health concerns can you address? | How can I start a fitness plan? | Let's discuss my health goals]`;
+          nextBotMessageType = 'error';
+
+          const assistantMessageId = generateUUIDv7();
+          const assistantMessage: Message = {
+            id: assistantMessageId,
+            sender: 'assistant',
+            content: '',
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            created_at: Date.now(),
+          };
+          set((state) => {
+            const nextMessages = { ...state.messages, [targetChatId]: [...(state.messages[targetChatId] || []), assistantMessage] };
+            saveChatState(state.chatSessions, nextMessages, targetChatId);
+            return { isTyping: false, streamingMessageId: assistantMessageId, messages: nextMessages, lastBotMessageType: nextBotMessageType };
+          });
+          let currentIdx = 0;
+          await new Promise<void>((resolveStream) => {
+            const interval = setInterval(() => {
+              if (currentIdx >= matchedResponse.length) {
+                clearInterval(interval);
+                set({ streamingMessageId: null, activeIntervalId: null });
+                saveChatState(get().chatSessions, get().messages, get().activeChatId);
+                resolveStream();
+              } else {
+                currentIdx += Math.min(Math.floor(Math.random() * 4) + 6, matchedResponse.length - currentIdx);
+                const sliced = matchedResponse.substring(0, currentIdx);
+                set((state) => ({
+                  messages: {
+                    ...state.messages,
+                    [targetChatId]: (state.messages[targetChatId] || []).map((msg) =>
+                      msg.id === assistantMessageId ? { ...msg, content: sliced } : msg
+                    ),
+                  },
+                }));
+              }
+            }, 8);
+            set({ activeIntervalId: interval });
+          });
+          return;
+        }
+
+        if (abuseResult.repetition && !abuseResult.blocked) {
+          // Warn the user about message repetition
+          const remaining = 4 - (abuseResult.count ?? 3);
+          matchedResponse = `Please avoid sending the same message repeatedly. I am here to help with your health and fitness goals.\n\n> ⚠️ ${remaining} more repetitive message${remaining !== 1 ? 's' : ''} will lock your message field for 15 minutes.\n\n[FollowUps: What health concerns can you address? | How can I start a fitness plan? | Let's focus on health]`;
+          nextBotMessageType = 'error';
+
+          const assistantMessageId = generateUUIDv7();
+          const assistantMessage: Message = {
+            id: assistantMessageId,
+            sender: 'assistant',
+            content: '',
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            created_at: Date.now(),
+          };
+          set((state) => {
+            const nextMessages = { ...state.messages, [targetChatId]: [...(state.messages[targetChatId] || []), assistantMessage] };
+            saveChatState(state.chatSessions, nextMessages, targetChatId);
+            return { isTyping: false, streamingMessageId: assistantMessageId, messages: nextMessages, lastBotMessageType: nextBotMessageType };
+          });
+          let currentIdx = 0;
+          await new Promise<void>((resolveStream) => {
+            const interval = setInterval(() => {
+              if (currentIdx >= matchedResponse.length) {
+                clearInterval(interval);
+                set({ streamingMessageId: null, activeIntervalId: null });
+                saveChatState(get().chatSessions, get().messages, get().activeChatId);
+                resolveStream();
+              } else {
+                currentIdx += Math.min(Math.floor(Math.random() * 4) + 6, matchedResponse.length - currentIdx);
+                const sliced = matchedResponse.substring(0, currentIdx);
+                set((state) => ({
+                  messages: {
+                    ...state.messages,
+                    [targetChatId]: (state.messages[targetChatId] || []).map((msg) =>
+                      msg.id === assistantMessageId ? { ...msg, content: sliced } : msg
+                    ),
+                  },
+                }));
+              }
+            }, 8);
+            set({ activeIntervalId: interval });
+          });
+          return;
+        }
+      } catch {
+        // Abuse check failed silently — allow the message through
+      }
 
       const isGreeting = isGreetingOrFiller(msgContent);
 
@@ -444,7 +662,8 @@ Could you rephrase that? Try something like:
 
         // Scenario 1: The user asked a health query or general question
         if (isQuery) {
-          const apiReply = await fetchGeminiResponse(msgContent, [], nextProfile, get().isExistingPatient, get().activeChatId || undefined);
+          const onboardingHistory = get().messages[targetChatId] || [];
+          const apiReply = await fetchGeminiResponse(msgContent, onboardingHistory.slice(-11, -1), nextProfile, get().isExistingPatient, get().activeChatId || undefined);
           
           if (anyNewExtraction && !currentStepError) {
             const resolvedNextStep = getNextOnboardingStep(nextProfile);
@@ -465,12 +684,13 @@ Could you rephrase that? Try something like:
             }
           }
         }
-        // Scenario 2: Validation error (no query, but has error)
-        else if (currentStepError) {
-          const activeQuestion = getOnboardingStepQuestion(onboardingStep, nextProfile);
+        // Scenario 2: Validation error (no query, not a greeting, but has error)
+        else if (currentStepError && !isGreeting) {
+          const activeStep = onboardingStep === 'not_started' ? 'asked_name' : onboardingStep;
+          const activeQuestion = getOnboardingStepQuestion(activeStep, nextProfile);
           matchedResponse = `${currentStepError}\n\n${activeQuestion}`;
           nextBotMessageType = 'onboarding_question';
-          nextStep = onboardingStep;
+          nextStep = activeStep;
         }
         // Scenario 3: Greeting (no query, no extraction)
         else if (isGreeting && !anyNewExtraction) {
@@ -492,7 +712,7 @@ Could you rephrase that? Try something like:
 
           const activeStep = onboardingStep === 'not_started' ? 'asked_name' : onboardingStep;
           const activeQuestion = getOnboardingStepQuestion(activeStep, nextProfile);
-          matchedResponse = `${baseGreeting}\n\n${activeQuestion}`;
+          matchedResponse = isFirstTime ? baseGreeting : `${baseGreeting}\n\n${activeQuestion}`;
           nextBotMessageType = 'onboarding_question';
           
           if (onboardingStep === 'not_started') {
@@ -512,9 +732,10 @@ Could you rephrase that? Try something like:
         }
         // Scenario 5: Fallback (no extraction, no greeting, not a query)
         else {
-          const activeQuestion = getOnboardingStepQuestion(onboardingStep, nextProfile);
+          const activeStep = onboardingStep === 'not_started' ? 'asked_name' : onboardingStep;
+          const activeQuestion = getOnboardingStepQuestion(activeStep, nextProfile);
           matchedResponse = `I didn't quite get that.\n\n${activeQuestion}`;
-          nextStep = onboardingStep;
+          nextStep = activeStep;
           nextBotMessageType = 'onboarding_question';
         }
 
@@ -549,7 +770,7 @@ Could you rephrase that? Try something like:
                 health_goal: nextProfile.health_goal || 'General wellness',
                 conditions: nextProfile.conditions || [],
                 feeling_note: nextProfile.feeling_note || '',
-                utm_campaign: get().utm_campaign || sessionStorage.getItem('utm_campaign') || 'default',
+                utm_campaign: get().utm_campaign || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_campaign') : null) || 'default',
                 utm_source: get().utm_source || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_source') : null),
                 utm_medium: get().utm_medium || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_medium') : null),
                 utm_content: get().utm_content || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_content') : null),
@@ -753,6 +974,30 @@ Could you rephrase that? Try something like:
   // ── Restore Existing Patient ──────────────────────────────────────────────
   restoreExistingUser: async (name, phone, personaData, sessionId) => {
     const capitalizedName = name.split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+    // Escape a string for safe use inside a RegExp.
+    const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    // Builds a function that strips this specific restored patient's name out
+    // of any historic message content when we don't have a confirmed
+    // first_name on the persona (i.e. we can't be sure showing their name is
+    // appropriate/intended). Previously this was hardcoded to one literal
+    // test name ("Lisha Karar"), which silently leaked the real name of any
+    // other patient who hit this code path. Now it's derived from the actual
+    // name passed in for this restore call.
+    const firstNameOnly = capitalizedName.split(' ')[0] || '';
+    const stripPatientName = (text: string): string => {
+      if (!capitalizedName) return text;
+      let result = text;
+      if (firstNameOnly) {
+        result = result
+          .replace(new RegExp(`Welcome back, ${escapeRegExp(capitalizedName)}!`, 'g'), 'Welcome back!')
+          .replace(new RegExp(`Hi ${escapeRegExp(firstNameOnly)}\\.`, 'g'), 'Hi.')
+          .replace(new RegExp(escapeRegExp(capitalizedName), 'g'), '')
+          .replace(new RegExp(escapeRegExp(firstNameOnly), 'g'), '');
+      }
+      return result;
+    };
     
     // Load the persona data into our optimized singleton manager
     if (personaData) {
@@ -791,11 +1036,7 @@ Could you rephrase that? Try something like:
             for (const key in localMessages) {
               localMessages[key] = localMessages[key].map(msg => ({
                 ...msg,
-                content: msg.content
-                  .replace(/Welcome back, Lisha Karar!/g, "Welcome back!")
-                  .replace(/Hi Lisha\./g, "Hi.")
-                  .replace(/Lisha Karar/g, "")
-                  .replace(/Lisha/g, "")
+                content: stripPatientName(msg.content)
               }));
             }
           }
@@ -823,11 +1064,7 @@ Could you rephrase that? Try something like:
             
             let content = m.content || '';
             if (!hasName) {
-              content = content
-                .replace(/Welcome back, Lisha Karar!/g, "Welcome back!")
-                .replace(/Hi Lisha\./g, "Hi.")
-                .replace(/Lisha Karar/g, "")
-                .replace(/Lisha/g, "");
+              content = stripPatientName(content);
             }
 
             return {
@@ -1123,5 +1360,3 @@ if (typeof window !== 'undefined') {
     }
   });
 }
-
-

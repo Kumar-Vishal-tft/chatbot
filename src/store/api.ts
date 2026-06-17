@@ -13,6 +13,40 @@ const predefinedPersonaCache: Record<string, string> = {};
 // In-memory cache registry to store active Gemini context cache names
 const geminiCacheRegistry: Record<string, { cacheName: string; expiresAt: number; contextHash: string }> = {};
 
+/**
+ * Single source of truth for phone number validation across the onboarding flow.
+ * Accepts:
+ *  - 10-digit Indian mobile numbers starting 6-9 (e.g. 9876543210)
+ *  - 0-prefixed 11-digit variants (e.g. 09876543210)
+ *  - 91-prefixed 12-digit variants (e.g. 919876543210)
+ *  - International numbers starting with '+' (e.g. +919876543210), where the
+ *    national significant number (digits after the country code) must still
+ *    start 6-9 if it looks like an Indian number, otherwise we accept any
+ *    10-15 digit international number.
+ * Returns the cleaned phone string (whitespace/hyphens stripped) if valid, or null.
+ */
+function validateAndNormalizePhone(raw: string): string | null {
+  const clean = raw.replace(/[-\s]/g, '');
+  if (!clean) return null;
+
+  if (clean.startsWith('+')) {
+    const digits = clean.slice(1);
+    if (!/^\d{10,15}$/.test(digits)) return null;
+
+    // If it's an Indian number in disguise (+91 followed by 10 digits),
+    // still enforce the 6-9 leading digit rule on the national number.
+    if (digits.startsWith('91') && digits.length === 12) {
+      const national = digits.slice(2);
+      if (!/^[6-9]\d{9}$/.test(national)) return null;
+    }
+    return clean;
+  }
+
+  // No '+' prefix: must be a recognizable Indian mobile number format.
+  const isPhoneValid = /^(?:0|91)?[6-9]\d{9}$/.test(clean);
+  return isPhoneValid ? clean : null;
+}
+
 function getSimpleHash(str: string): string {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -189,7 +223,15 @@ export async function fetchGeminiResponse(
     }
   }
 
-  const isInOnboarding = profile && (!profile.name || !profile.age || !profile.gender || !profile.phone_number || !profile.health_goal || !profile.conditions || !profile.feeling_note);
+  const isInOnboarding = !!profile && (
+    !profile.name ||
+    profile.age === undefined || profile.age === null || profile.age === '' ||
+    !profile.gender ||
+    !profile.phone_number ||
+    !profile.health_goal ||
+    !profile.conditions || profile.conditions.length === 0 ||
+    !profile.feeling_note
+  );
   const questionOverride = isInOnboarding
     ? `\n\nCRITICAL INSTRUCTION: The user is currently in the onboarding flow and has sent a general query/question: "${prompt}". You MUST directly, clearly, and concisely answer their query/question in 2-3 sentences. Do NOT output any standard welcome greeting, introduction, or campaign starting script (like "Hello! I am Dr. Dia..."). Focus entirely on answering their query.`
     : ``;
@@ -568,14 +610,13 @@ export async function verifyUserData(
     if (isValid && parsedValue) {
       const isPhoneStep = step === 'asked_phone' || String(step).toLowerCase().includes('phone');
       if (isPhoneStep) {
-        const clean = parsedValue.replace(/[-\s]/g, '');
-        const isPhoneValid = clean.startsWith('+') 
-          ? /^\d{10,15}$/.test(clean.slice(1))
-          : /^(?:0|91)?[6-9]\d{9}$/.test(clean);
-        if (!isPhoneValid) {
+        const normalizedPhone = validateAndNormalizePhone(parsedValue);
+        if (!normalizedPhone) {
           isValid = false;
           parsedValue = '';
           errorMessage = 'Phone number must be 10 digits starting with 6-9 or international format.';
+        } else {
+          parsedValue = normalizedPhone;
         }
       }
     }
@@ -626,23 +667,10 @@ export async function verifyUserData(
     }
 
     if (normalizedStep === 'phone') {
-      const digits = trimmed.replace(/\D/g, '');
-      const startsWithPlus = trimmed.startsWith('+');
-      let isPhoneValid = false;
-
-      if (digits.length === 10) {
-        isPhoneValid = /^[6-9]\d{9}$/.test(digits);
-      } else if (digits.length === 11) {
-        isPhoneValid = /^0[6-9]\d{9}$/.test(digits);
-      } else if (digits.length === 12) {
-        isPhoneValid = /^91[6-9]\d{9}$/.test(digits);
-      } else if (startsWithPlus) {
-        isPhoneValid = digits.length >= 10 && digits.length <= 15;
-      }
-
+      const normalizedPhone = validateAndNormalizePhone(trimmed);
       return {
-        isValid: isPhoneValid && !isSentence,
-        parsedValue: isPhoneValid ? trimmed : '',
+        isValid: !!normalizedPhone && !isSentence,
+        parsedValue: normalizedPhone || '',
         isQuestionOrQuery: isSentence
       };
     }
@@ -727,6 +755,27 @@ export async function extractOnboardingEntities(
   let res: any = {};
   let errors: Record<string, string> = {};
 
+  if (currentStep && hasProfanity(content)) {
+    const stepName = currentStep.toLowerCase().replace('asked_', '');
+    if (stepName === 'name') {
+      errors.name = "That doesn't look like a real name. Please enter a valid name.";
+    } else if (stepName === 'age') {
+      errors.age = "Please enter a valid age between 5 and 110.";
+    } else if (stepName === 'gender') {
+      errors.gender = "Please select Male, Female, or Prefer not to say.";
+    } else if (stepName === 'phone') {
+      errors.phone_number = "Please enter a valid phone number.";
+    } else if (stepName === 'goal') {
+      errors.health_goal = "Please describe your health goals.";
+    } else if (stepName === 'conditions') {
+      errors.conditions = "Please list any medical conditions or specify 'None'.";
+    } else if (stepName === 'feeling') {
+      errors.feeling_note = "Please describe how you are feeling.";
+    }
+    res.errors = errors;
+    return res;
+  }
+
   try {
     const response = await fetch('/api/extract', {
       method: 'POST',
@@ -751,12 +800,9 @@ export async function extractOnboardingEntities(
         else if (ext.gender?.reason) errors.gender = ext.gender.reason;
 
         if (ext.phone_number?.valid && ext.phone_number.value) {
-          const cleanPhone = ext.phone_number.value.replace(/[-\s]/g, '');
-          const isPhoneValid = cleanPhone.startsWith('+') 
-            ? /^\d{10,15}$/.test(cleanPhone.slice(1))
-            : /^(?:0|91)?[6-9]\d{9}$/.test(cleanPhone);
-          if (isPhoneValid) {
-            res.phone_number = cleanPhone;
+          const normalizedPhone = validateAndNormalizePhone(ext.phone_number.value);
+          if (normalizedPhone) {
+            res.phone_number = normalizedPhone;
           } else {
             errors.phone_number = 'Phone number must be 10 digits starting with 6-9 or international format.';
           }
@@ -783,12 +829,16 @@ export async function extractOnboardingEntities(
   // run the context-aware fallback logic to retrieve the entity.
   const lower = content.toLowerCase().trim();
 
+  // Shared blocklist of words that should never be accepted as a name, used by
+  // both the "I am X" pattern match and the bare single-word fallback below.
+  const NAME_BLOCKLIST = /^(male|female|guy|man|girl|woman|skip|none|na|n\/a|nil|diabetes|hypertension|asthma|obesity|my|i|im|am|hi|hey|hello|yo|sup|ola|hola|hallo|what|how|why|when|where|who|which|help)$/i;
+
   // 1. Context-aware/Fallback: Name
   if (!res.name && (!currentStep || currentStep === 'asked_name')) {
     const nameMatch = content.match(/\b(?:i am|i'm|name is|call me|myself)\s+([A-Za-z]{2,15})\b/i);
     if (nameMatch && nameMatch[1]) {
       const nameVal = nameMatch[1].trim();
-      if (!/^(male|female|guy|man|girl|woman|skip|none|diabetes|hypertension)$/i.test(nameVal)) {
+      if (!NAME_BLOCKLIST.test(nameVal) && !hasProfanity(nameVal)) {
         res.name = nameVal.charAt(0).toUpperCase() + nameVal.slice(1).toLowerCase();
       }
     } else {
@@ -799,8 +849,8 @@ export async function extractOnboardingEntities(
         const firstWord = content.trim().split(/[\s,]+/)[0];
         const isWordGreeting = isGreetingOrFiller(firstWord);
         const hasLetters = /^[A-Za-z]{2,15}$/.test(firstWord);
-        const isCommonKeyword = /^(male|female|skip|none|diabetes|hypertension|my|i|im|am|what|how|why|when|where|who|which|help)$/i.test(firstWord);
-        if (hasLetters && !isWordGreeting && !isCommonKeyword) {
+        const isCommonKeyword = NAME_BLOCKLIST.test(firstWord);
+        if (hasLetters && !isWordGreeting && !isCommonKeyword && !hasProfanity(firstWord)) {
           res.name = firstWord.charAt(0).toUpperCase() + firstWord.slice(1).toLowerCase();
         }
       }
@@ -832,12 +882,9 @@ export async function extractOnboardingEntities(
   if (!res.phone_number && (!currentStep || currentStep === 'asked_phone')) {
     const phoneMatch = content.replace(/[-\s]/g, '').match(/\+?\d{10,15}/);
     if (phoneMatch) {
-      const p = phoneMatch[0];
-      const isPhoneValid = p.startsWith('+') 
-        ? /^\d{10,15}$/.test(p.slice(1))
-        : /^(?:0|91)?[6-9]\d{9}$/.test(p);
-      if (isPhoneValid) {
-        res.phone_number = p;
+      const normalizedPhone = validateAndNormalizePhone(phoneMatch[0]);
+      if (normalizedPhone) {
+        res.phone_number = normalizedPhone;
       }
     }
   }

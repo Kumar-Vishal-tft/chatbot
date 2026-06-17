@@ -2,11 +2,56 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
 
+function hasProfanity(text: string): boolean {
+  const badWords = [
+    'fuck', 'shit', 'bitch', 'asshole', 'crap', 'dick', 'pussy', 'bastard',
+    'idiot', 'dumb', 'stupid', 'whore', 'slut', 'cunt', 'fag', 'nigger',
+    'retard', 'wanker', 'motherfucker', 'cocksucker',
+  ];
+  const lower = text.toLowerCase();
+  return badWords.some((word) => lower.includes(word));
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { text, currentStep } = await request.json();
     if (typeof text !== 'string') {
       return NextResponse.json({ success: false, reason: 'Invalid parameters' }, { status: 400 });
+    }
+
+    // Deterministic profanity check
+    if (hasProfanity(text)) {
+      const stepName = currentStep ? currentStep.toLowerCase().replace('asked_', '') : '';
+      const emptyResult = {
+        name: { valid: false, value: null, reason: '' },
+        age: { valid: false, value: null, reason: '' },
+        gender: { valid: false, value: null, reason: '' },
+        phone_number: { valid: false, value: null, reason: '' },
+        health_goal: { valid: false, value: null, reason: '' },
+        conditions: { valid: false, value: null, reason: '' },
+        feeling_note: { valid: false, value: null, reason: '' }
+      };
+
+      if (stepName === 'name') {
+        emptyResult.name = { valid: false, value: null, reason: "That doesn't look like a real name. Please enter a valid name." };
+      } else if (stepName === 'age') {
+        emptyResult.age = { valid: false, value: null, reason: 'Please enter a valid age between 5 and 110.' };
+      } else if (stepName === 'gender') {
+        emptyResult.gender = { valid: false, value: null, reason: 'Please select Male, Female, or Prefer not to say.' };
+      } else if (stepName === 'phone') {
+        emptyResult.phone_number = { valid: false, value: null, reason: 'Please enter a valid phone number.' };
+      } else if (stepName === 'goal') {
+        emptyResult.health_goal = { valid: false, value: null, reason: 'Please describe your health goals.' };
+      } else if (stepName === 'conditions') {
+        emptyResult.conditions = { valid: false, value: null, reason: 'Please list any medical conditions or specify "None".' };
+      } else if (stepName === 'feeling') {
+        emptyResult.feeling_note = { valid: false, value: null, reason: 'Please describe how you are feeling.' };
+      }
+
+      return NextResponse.json({
+        success: true,
+        extracted: emptyResult
+      });
     }
 
     if (!GEMINI_API_KEY) {

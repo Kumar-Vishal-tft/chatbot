@@ -2,11 +2,48 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
 
+function hasProfanity(text: string): boolean {
+  const badWords = [
+    'fuck', 'shit', 'bitch', 'asshole', 'crap', 'dick', 'pussy', 'bastard',
+    'idiot', 'dumb', 'stupid', 'whore', 'slut', 'cunt', 'fag', 'nigger',
+    'retard', 'wanker', 'motherfucker', 'cocksucker',
+  ];
+  const lower = text.toLowerCase();
+  return badWords.some((word) => lower.includes(word));
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { step, value } = await request.json();
     if (!step || typeof value !== 'string') {
       return NextResponse.json({ valid: false, reason: 'Invalid parameters' }, { status: 400 });
+    }
+
+    const normalizedStep = step.toLowerCase().replace('asked_', '');
+
+    // Deterministic profanity check
+    if (hasProfanity(value)) {
+      let reason = 'Please enter a valid input.';
+      if (normalizedStep === 'name') {
+        reason = "That doesn't look like a real name. Please enter a valid name.";
+      } else if (normalizedStep === 'age') {
+        reason = 'Please enter a valid age between 5 and 110.';
+      } else if (normalizedStep === 'gender') {
+        reason = 'Please select Male, Female, or Prefer not to say.';
+      } else if (normalizedStep === 'phone') {
+        reason = 'Please enter a valid mobile number.';
+      } else if (normalizedStep === 'goal') {
+        reason = 'Please describe your health goals.';
+      } else if (normalizedStep === 'conditions') {
+        reason = 'Please mention any medical conditions, or specify "None".';
+      } else if (normalizedStep === 'feeling') {
+        reason = 'Please enter a note about how you are feeling (2-500 characters).';
+      }
+      return NextResponse.json({
+        valid: false,
+        normalized: '',
+        reason
+      });
     }
 
     if (!GEMINI_API_KEY) {
@@ -16,7 +53,6 @@ export async function POST(request: NextRequest) {
 
     let systemInstruction = '';
     const trimmedVal = value.trim();
-    const normalizedStep = step.toLowerCase().replace('asked_', '');
 
     switch (normalizedStep) {
       case 'name':
