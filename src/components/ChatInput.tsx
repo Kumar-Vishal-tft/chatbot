@@ -681,6 +681,18 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
                   <p>
                     Built with high-trust clinical security guidelines, YHealth ensures your conversation history is safe, private, and encrypted.
                   </p>
+                  <div className="mt-1 flex flex-col gap-1">
+                    <div className="text-[10px] text-neutral-400 dark:text-neutral-500 font-bold uppercase tracking-wider">Website</div>
+                    <a
+                      href="https://yhealth.me/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors w-fit cursor-pointer"
+                    >
+                      <span>yhealth.me</span>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-external-link shrink-0"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+                    </a>
+                  </div>
                   <div className="p-3 bg-black/[0.02] dark:bg-white/[0.02] border border-black/5 dark:border-white/5 rounded-2xl text-[11px] text-neutral-500 dark:text-neutral-500">
                     Note: YHealth is an AI health companion. For clinical diagnosis or emergencies, always seek help from a qualified medical professional.
                   </div>
