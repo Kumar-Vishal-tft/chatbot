@@ -1148,9 +1148,7 @@ CRITICAL RULES FOR RESPONSES:
                   </p>
                 ) : (
                   <p className="text-sm font-medium text-neutral-800 dark:text-neutral-200 leading-relaxed italic">
-                    {transcript ? `"${transcript}"` : 
-                     state === 'connecting' ? 'Initializing voice channel...' : 
-                     'Say something, I am listening...'}
+                    "How can I help you now?"
                   </p>
                 )}
               </div>

@@ -288,60 +288,81 @@ Remember: Be warm, clear, and genuinely helpful. Always recommend seeing a docto
 
   try {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
+    let response;
+    let data;
+    let attempts = 0;
+    const maxAttempts = 2;
+    let trimmed = '';
 
-    const requestBody: any = {
-      contents: mappedHistory,
-      generationConfig: { temperature: 0.85, maxOutputTokens: 1024 },
-    };
+    while (attempts < maxAttempts) {
+      try {
+        attempts++;
 
-    if (cacheName) {
-      requestBody.cachedContent = cacheName;
-    } else {
-      requestBody.systemInstruction = { parts: [{ text: systemInstruction }] };
+        const requestBody: any = {
+          contents: mappedHistory,
+          generationConfig: { temperature: 0.85, maxOutputTokens: 1024 },
+        };
+
+        if (cacheName) {
+          requestBody.cachedContent = cacheName;
+        } else {
+          requestBody.systemInstruction = { parts: [{ text: systemInstruction }] };
+        }
+
+        response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`Gemini API Error details (Attempt ${attempts}/${maxAttempts}):`, errorText);
+          throw new Error(`Gemini request failed: ${response.statusText}`);
+        }
+
+        data = await response.json();
+        const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!replyText) {
+          throw new Error('Empty response from Gemini API');
+        }
+        
+        trimmed = replyText.trim();
+        break; // Success! Break out of the retry loop.
+      } catch (err) {
+        if (attempts >= maxAttempts) {
+          throw err; // Re-throw the error if all attempts failed
+        }
+        console.warn(`Gemini API call failed (Attempt ${attempts}/${maxAttempts}), retrying in 1.5s...`, err);
+        await new Promise((resolve) => setTimeout(resolve, 1500)); // wait 1.5s before retry
+      }
     }
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
-    });
+    if (trimmed.includes('[FALLBACK_TO_MONGO]') && hasPersona) {
+      const rawPersona = activePersonaManager.getRawPersona();
+      const userId = rawPersona?._meta?.mongo_patient_id || rawPersona?.identity?.patient_id;
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Gemini API Error details:', errorText);
-      throw new Error(`Gemini request failed: ${response.statusText}`);
-    }
+      if (userId) {
+        console.log(`LLM requested fallback. Querying MongoDB for user ${userId} and query: "${prompt}"`);
+        try {
+          const agentRes = await fetch('/api/agent/query', {
+            method: 'POST',
+            headers: {
+              'accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              user_id: userId,
+              query: prompt,
+            }),
+          });
 
-    const data = await response.json();
-    const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (replyText) {
-      let trimmed = replyText.trim();
+          if (agentRes.ok) {
+            const agentData = await agentRes.json();
+            console.log('Successfully retrieved MongoDB details:', agentData);
 
-      if (trimmed.includes('[FALLBACK_TO_MONGO]') && hasPersona) {
-        const rawPersona = activePersonaManager.getRawPersona();
-        const userId = rawPersona?._meta?.mongo_patient_id || rawPersona?.identity?.patient_id;
-
-        if (userId) {
-          console.log(`LLM requested fallback. Querying MongoDB for user ${userId} and query: "${prompt}"`);
-          try {
-            const agentRes = await fetch('/api/agent/query', {
-              method: 'POST',
-              headers: {
-                'accept': 'application/json',
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                user_id: userId,
-                query: prompt,
-              }),
-            });
-
-            if (agentRes.ok) {
-              const agentData = await agentRes.json();
-              console.log('Successfully retrieved MongoDB details:', agentData);
-
-              if (agentData && (agentData.answer || agentData.analytics)) {
-                const fallbackContext = `
+            if (agentData && (agentData.answer || agentData.analytics)) {
+              const fallbackContext = `
 [DATABASE RETRIEVAL SUCCESSFUL]
 The following details were retrieved from the MongoDB patient record:
 - Summarized DB Answer: ${agentData.answer || 'No direct summary'}
@@ -351,93 +372,90 @@ Please formulate a warm, helpful, clear, and beautifully structured clinical res
 Use standard Markdown formatting (lists, bolding, headers, tables, strategic alerts like > [!NOTE], no emojis, etc.) and end with exactly 3 personalized [FollowUps: ...] chips. Do not mention that this data came from a database query/fallback unless necessary, just present it naturally as the clinical status of the patient.
 `;
 
-                const finalInstruction = systemInstruction.replace(
-                  '### ACTIVE PATIENT CLINICAL HISTORY & ROUTED CONTEXT:',
-                  `### ACTIVE PATIENT CLINICAL HISTORY & ROUTED CONTEXT:\n${fallbackContext}`
-                );
+              const finalInstruction = systemInstruction.replace(
+                '### ACTIVE PATIENT CLINICAL HISTORY & ROUTED CONTEXT:',
+                `### ACTIVE PATIENT CLINICAL HISTORY & ROUTED CONTEXT:\n${fallbackContext}`
+              );
 
-                const finalRequestBody = {
-                  contents: [
-                    ...mappedHistory.slice(0, -1),
-                    { role: 'user', parts: [{ text: prompt }] },
-                    { role: 'model', parts: [{ text: '[Requesting clinical data fallback...]' }] },
-                    { role: 'user', parts: [{ text: `Here is the clinical data: ${JSON.stringify(agentData)}` }] }
-                  ],
-                  generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
-                  systemInstruction: { parts: [{ text: finalInstruction }] }
-                };
+              const finalRequestBody = {
+                contents: [
+                  ...mappedHistory.slice(0, -1),
+                  { role: 'user', parts: [{ text: prompt }] },
+                  { role: 'model', parts: [{ text: '[Requesting clinical data fallback...]' }] },
+                  { role: 'user', parts: [{ text: `Here is the clinical data: ${JSON.stringify(agentData)}` }] }
+                ],
+                generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+                systemInstruction: { parts: [{ text: finalInstruction }] }
+              };
 
-                const finalResponse = await fetch(url, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(finalRequestBody),
-                });
+              const finalResponse = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(finalRequestBody),
+              });
 
-                if (finalResponse.ok) {
-                  const finalData = await finalResponse.json();
-                  const finalReplyText = finalData?.candidates?.[0]?.content?.parts?.[0]?.text;
-                  if (finalReplyText) {
-                    trimmed = finalReplyText.trim();
-                    console.log('Formatted fallback response generated successfully:', trimmed);
-                  }
+              if (finalResponse.ok) {
+                const finalData = await finalResponse.json();
+                const finalReplyText = finalData?.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (finalReplyText) {
+                  trimmed = finalReplyText.trim();
+                  console.log('Formatted fallback response generated successfully:', trimmed);
                 }
               }
             }
-          } catch (err) {
-            console.warn('Fallback MongoDB query or secondary Gemini format failed, using retry:', err);
           }
-        }
-
-        // If secondary generation or agent call failed and trimmed is still fallback token, retry with fallback rule stripped
-        if (trimmed.includes('[FALLBACK_TO_MONGO]')) {
-          const fallbackInstruction = systemInstruction.replace(
-            /4\.\s*If the user's query is asking for[\s\S]*?answer it directly\./i,
-            ''
-          );
-          try {
-            const retryResponse = await fetch(url, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                contents: mappedHistory,
-                generationConfig: { temperature: 0.8, maxOutputTokens: 1024 },
-                systemInstruction: { parts: [{ text: fallbackInstruction }] }
-              }),
-            });
-            if (retryResponse.ok) {
-              const retryData = await retryResponse.json();
-              const retryReply = retryData.candidates?.[0]?.content?.parts?.[0]?.text;
-              if (retryReply) {
-                trimmed = retryReply.trim();
-              }
-            }
-          } catch (err) {
-            console.warn('Direct fallback retry failed:', err);
-          }
+        } catch (err) {
+          console.warn('Fallback MongoDB query or secondary Gemini format failed, using retry:', err);
         }
       }
 
-      // Asynchronously trigger Langfuse tracing (non-blocking)
-      const activeChatId = sessionId;
-
-      fetch('/api/trace', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'chat-response',
-          input: prompt,
-          output: trimmed,
-          model: 'gemini-2.5-flash-lite',
-          userId: profile?.name || 'anonymous',
-          sessionId: activeChatId || undefined,
-          usageMetadata: data.usageMetadata
-        })
-      }).catch(err => console.warn('Langfuse tracing proxy failed:', err));
-
-      return trimmed;
+      // If secondary generation or agent call failed and trimmed is still fallback token, retry with fallback rule stripped
+      if (trimmed.includes('[FALLBACK_TO_MONGO]')) {
+        const fallbackInstruction = systemInstruction.replace(
+          /4\.\s*If the user's query is asking for[\s\S]*?answer it directly\./i,
+          ''
+        );
+        try {
+          const retryResponse = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: mappedHistory,
+              generationConfig: { temperature: 0.8, maxOutputTokens: 1024 },
+              systemInstruction: { parts: [{ text: fallbackInstruction }] }
+            }),
+          });
+          if (retryResponse.ok) {
+            const retryData = await retryResponse.json();
+            const retryReply = retryData.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (retryReply) {
+              trimmed = retryReply.trim();
+            }
+          }
+        } catch (err) {
+          console.warn('Direct fallback retry failed:', err);
+        }
+      }
     }
 
-    throw new Error('Empty response from Gemini API');
+    // Asynchronously trigger Langfuse tracing (non-blocking)
+    const activeChatId = sessionId;
+
+    fetch('/api/trace', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'chat-response',
+        input: prompt,
+        output: trimmed,
+        model: 'gemini-2.5-flash-lite',
+        userId: profile?.name || 'anonymous',
+        sessionId: activeChatId || undefined,
+        usageMetadata: data.usageMetadata
+      })
+    }).catch(err => console.warn('Langfuse tracing proxy failed:', err));
+
+    return trimmed;
   } catch (error) {
     console.error('Gemini API Fetch failed:', error);
     return `Sorry, I ran into a connection issue and couldn't fetch a response right now.
@@ -510,57 +528,73 @@ Strict rules:
   const cacheName = await getOrCreateGeminiCache(systemInstruction, 'models/gemini-2.5-flash-lite');
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
+    let response;
+    let data;
+    let attempts = 0;
+    const maxAttempts = 2;
+    let trimmed = '';
 
-    const requestBody: any = {
-      contents: mappedHistory,
-      generationConfig: { temperature: 0.9, maxOutputTokens: 1024 },
-    };
+    while (attempts < maxAttempts) {
+      try {
+        attempts++;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
 
-    if (cacheName) {
-      requestBody.cachedContent = cacheName;
-    } else {
-      requestBody.systemInstruction = { parts: [{ text: systemInstruction }] };
+        const requestBody: any = {
+          contents: mappedHistory,
+          generationConfig: { temperature: 0.9, maxOutputTokens: 1024 },
+        };
+
+        if (cacheName) {
+          requestBody.cachedContent = cacheName;
+        } else {
+          requestBody.systemInstruction = { parts: [{ text: systemInstruction }] };
+        }
+
+        response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!response.ok) throw new Error(`Gemini greeting failed: ${response.statusText}`);
+
+        data = await response.json();
+        const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!replyText) throw new Error('Empty greeting response from Gemini');
+        
+        trimmed = replyText.trim();
+        break; // Success! Break out of the retry loop.
+      } catch (err) {
+        if (attempts >= maxAttempts) {
+          throw err;
+        }
+        console.warn(`Greeting LLM call failed (Attempt ${attempts}/${maxAttempts}), retrying in 1.5s...`, err);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
     }
 
-    const response = await fetch(url, {
+    // Asynchronously trigger Langfuse tracing (non-blocking)
+    let activeChatId = undefined;
+    try {
+      const { useChatStore } = require('./chatStore');
+      activeChatId = useChatStore.getState().activeChatId;
+    } catch (e) { }
+
+    fetch('/api/trace', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
-    });
+      body: JSON.stringify({
+        name: 'greeting-response',
+        input: userInput,
+        output: trimmed,
+        model: 'gemini-2.5-flash-lite',
+        userId: userName || 'anonymous',
+        sessionId: activeChatId || undefined,
+        usageMetadata: data.usageMetadata
+      })
+    }).catch(err => console.warn('Langfuse tracing proxy failed:', err));
 
-    if (!response.ok) throw new Error(`Gemini greeting failed: ${response.statusText}`);
-
-    const data = await response.json();
-    const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (replyText) {
-      const trimmed = replyText.trim();
-
-      // Asynchronously trigger Langfuse tracing (non-blocking)
-      let activeChatId = undefined;
-      try {
-        const { useChatStore } = require('./chatStore');
-        activeChatId = useChatStore.getState().activeChatId;
-      } catch (e) { }
-
-      fetch('/api/trace', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'greeting-response',
-          input: userInput,
-          output: trimmed,
-          model: 'gemini-2.5-flash-lite',
-          userId: userName || 'anonymous',
-          sessionId: activeChatId || undefined,
-          usageMetadata: data.usageMetadata
-        })
-      }).catch(err => console.warn('Langfuse tracing proxy failed:', err));
-
-      return trimmed;
-    }
-
-    throw new Error('Empty greeting response from Gemini');
+    return trimmed;
   } catch (error) {
     console.warn('Greeting LLM call failed, using local fallback:', error);
     // Offline fallback — static but still context-aware

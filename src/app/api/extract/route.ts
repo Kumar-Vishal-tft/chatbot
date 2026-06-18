@@ -115,35 +115,58 @@ Your output must be a clean JSON object. Do not include markdown formatting or p
     }
     const fullSystemInstruction = `${systemInstruction}${contextHint}`;
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text }] }],
-        systemInstruction: { parts: [{ text: fullSystemInstruction }] },
-        generationConfig: {
-          temperature: 0.1,
-          responseMimeType: 'application/json',
-          maxOutputTokens: 512
-        },
-      }),
-    });
+    let response;
+    let data;
+    let attempts = 0;
+    const maxAttempts = 2;
+    let parsedJson = null;
 
-    if (response.ok) {
-      const data = await response.json();
-      const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (replyText) {
-        const cleaned = replyText.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
-        const parsed = JSON.parse(cleaned);
-        return NextResponse.json({
-          success: true,
-          extracted: parsed.extracted
+    while (attempts < maxAttempts) {
+      try {
+        attempts++;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
+        response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text }] }],
+            systemInstruction: { parts: [{ text: fullSystemInstruction }] },
+            generationConfig: {
+              temperature: 0.1,
+              responseMimeType: 'application/json',
+              maxOutputTokens: 512
+            },
+          }),
         });
+
+        if (!response.ok) {
+          const errText = await response.text().catch(() => 'No details');
+          throw new Error(`Gemini Extraction API Error: Status ${response.status}. Details: ${errText}`);
+        }
+
+        data = await response.json();
+        const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!replyText) {
+          throw new Error('Empty response from Gemini Extraction API');
+        }
+
+        const cleaned = replyText.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+        parsedJson = JSON.parse(cleaned);
+        break; // Success!
+      } catch (err) {
+        if (attempts >= maxAttempts) {
+          throw err;
+        }
+        console.warn(`Extraction LLM call failed (Attempt ${attempts}/${maxAttempts}), retrying in 1.5s...`, err);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
       }
-    } else {
-      const errText = await response.text().catch(() => 'No details');
-      console.error(`Gemini Extraction API Error: Status ${response.status}. Details: ${errText}`);
+    }
+
+    if (parsedJson) {
+      return NextResponse.json({
+        success: true,
+        extracted: parsedJson.extracted
+      });
     }
 
     return NextResponse.json({ success: false, reason: 'Failed to extract entities' }, { status: 500 });

@@ -90,26 +90,40 @@ async function extractLeadInfo(chatHistoryText: string): Promise<any> {
     }
   };
 
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+  let response;
+  let data;
+  let attempts = 0;
+  const maxAttempts = 2;
 
-    if (!response.ok) {
-      console.error('Gemini lead extraction request failed:', response.statusText);
-      return null;
-    }
+  while (attempts < maxAttempts) {
+    try {
+      attempts++;
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
 
-    const data = await response.json();
-    const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (replyText) {
+      if (!response.ok) {
+        throw new Error(`Gemini lead extraction request failed: Status ${response.status} (${response.statusText})`);
+      }
+
+      data = await response.json();
+      const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!replyText) {
+        throw new Error('Empty response from Gemini Lead Extraction API');
+      }
+
       const cleaned = cleanJsonResponse(replyText);
       return JSON.parse(cleaned);
+    } catch (error) {
+      if (attempts >= maxAttempts) {
+        console.error('Final error calling Gemini for lead extraction:', error);
+        return null;
+      }
+      console.warn(`Lead extraction LLM call failed (Attempt ${attempts}/${maxAttempts}), retrying in 1.5s...`, error);
+      await new Promise((resolve) => setTimeout(resolve, 1500));
     }
-  } catch (error) {
-    console.error('Error calling Gemini for lead extraction:', error);
   }
   return null;
 }

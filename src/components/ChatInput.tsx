@@ -408,23 +408,6 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
       {/* Floating CTA row (only shows when clinical profiling flow is not active AND user is not an existing patient) */}
       {!isExistingPatient && onboardingStep === 'completed' && (
         <div className="w-full max-w-[860px] mx-auto mb-2.5 flex flex-nowrap md:flex-wrap items-center justify-start md:justify-center gap-2 overflow-x-auto no-scrollbar px-4 md:px-2 select-none animate-fade-in">
-          {/* 1. Download YHealth App */}
-          <button
-            onClick={() => setCtaModal('download')}
-            className="group flex flex-shrink-0 items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold
-              bg-white/80 dark:bg-black/20 
-              border border-black/[0.08] dark:border-white/[0.08]
-              hover:border-black/20 dark:hover:border-white/25
-              text-neutral-600 dark:text-neutral-300 
-              hover:text-black dark:hover:text-white
-              hover:bg-white dark:hover:bg-white/[0.02]
-              shadow-sm hover:shadow-md hover:-translate-y-0.5
-              transition-all duration-300 active:scale-95 cursor-pointer"
-          >
-            <Smartphone className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400 group-hover:scale-110 transition-transform duration-300" />
-            <span>Download YHealth App</span>
-          </button>
-
           {/* 2. Speak to YHealth Expert */}
           <button
             onClick={() => setCtaModal('expert')}
@@ -594,18 +577,18 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
             placeholder={
-              onboardingStep === 'asked_name' ? 'Type your name here...' :
+              onboardingStep === 'asked_name' ? 'Type your name...' :
               onboardingStep === 'asked_age' ? 'Type your age...' :
-              onboardingStep === 'asked_gender' ? 'Type or choose your gender...' :
-              onboardingStep === 'asked_phone' ? 'Type your mobile number...' :
-              onboardingStep === 'asked_goal' ? 'Type or choose what you would like help with...' :
-              onboardingStep === 'asked_conditions' ? 'Type or choose medical conditions...' :
-              onboardingStep === 'asked_feeling' ? 'How are you feeling today?' :
+              onboardingStep === 'asked_gender' ? 'Select or type gender...' :
+              onboardingStep === 'asked_phone' ? 'Type mobile number...' :
+              onboardingStep === 'asked_goal' ? 'What can I help with?...' :
+              onboardingStep === 'asked_conditions' ? 'Medical conditions...' :
+              onboardingStep === 'asked_feeling' ? 'How are you feeling?...' :
               ""
             }
             rows={1}
             disabled={isDisabled}
-            className="w-full bg-transparent text-[#111111] dark:text-white text-sm md:text-[15px] font-medium resize-none focus:outline-none disabled:opacity-50 relative z-10 caret-[#111111] dark:caret-white pl-1.5 pr-2 no-scrollbar max-h-[120px] md:max-h-[180px] overflow-y-auto"
+            className="w-full bg-transparent text-[#111111] dark:text-white text-sm md:text-[15px] font-medium resize-none focus:outline-none disabled:opacity-50 relative z-10 caret-[#111111] dark:caret-white pl-1.5 pr-2 no-scrollbar max-h-[120px] md:max-h-[180px] overflow-y-auto placeholder:truncate"
             style={{
               height: '24px',
               lineHeight: '24px',
@@ -652,10 +635,16 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
       </div>
 
       {/* Trust badge */}
-      <div className="hidden md:flex items-center justify-center gap-1.5 mt-1 select-none">
-        <Lock className="w-3 h-3 text-black/20 dark:text-white/20 flex-shrink-0" />
+      <div className="hidden md:flex items-center justify-center gap-1.5 mt-1">
         <span className="text-[11px] text-black/30 dark:text-white/25 font-medium tracking-wide">
-          Private · Encrypted · HIPAA Compliant
+          <a
+            href="https://yhealth.me/privacy-policy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-black/60 dark:hover:text-white/60 underline transition-colors cursor-pointer"
+          >
+            Privacy Policy
+          </a>
         </span>
       </div>
       {/* Root level Voice Assistant Bottom Sheet / Modal */}
