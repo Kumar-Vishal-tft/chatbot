@@ -68,6 +68,17 @@ function getTimeOfDayGreeting(name?: string): string {
   return "How can I help you today?";
 }
 
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+  return isMobile;
+}
+
 export default function Home() {
   const { 
     activeChatId, 
@@ -94,10 +105,10 @@ export default function Home() {
   /* ── Stage ── */
   const [stage, setStage] = useState<Stage>('welcome');
   const [isMounted, setIsMounted] = useState(false);
-
-  /* ── Welcome typing ── */
   const [displayText, setDisplayText] = useState('');
-  const [isTypingDone, setIsTypingDone] = useState(false);
+  const isMobile = useIsMobile();
+
+
 
   /* ── User identity ── */
   const [showTour, setShowTour] = useState(false);
@@ -209,7 +220,6 @@ export default function Home() {
         const p = JSON.parse(existing) as VerifiedUser;
         restoreExistingUser(p.name, p.phone, p.persona, p.session_id);
         setStage('chat');
-        setIsTypingDone(true);
         return;
       } catch {}
     }
@@ -225,7 +235,6 @@ export default function Home() {
           isVerified: true
         });
         setStage('chat');
-        setIsTypingDone(true);
         return;
       } catch {}
     }
@@ -234,26 +243,27 @@ export default function Home() {
     const visitedSplash = localStorage.getItem('yhealth_visited_splash_v1');
     if (visitedSplash === 'true') {
       setStage('chat');
-      setIsTypingDone(true);
       return;
     }
-
-    // Fresh user → welcome with typing animation
-    let idx = 0;
-    const fullText = "Welcome to YHealth AI";
-    const id = setInterval(() => {
-      if (idx < fullText.length) {
-        const ch = fullText[idx];   // capture BEFORE any increment
-        idx++;
-        setDisplayText(p => p + ch);
-      }
-      if (idx >= fullText.length) {
-        clearInterval(id);
-        setIsTypingDone(true);
-      }
-    }, 90);
-    return () => clearInterval(id);
   }, []);
+
+  const fullGreetingText = getTimeOfDayGreeting(userName);
+  useEffect(() => {
+    if (stage !== 'chat') return;
+    if (showTour && !isMobile) return;
+    setDisplayText('');
+    let idx = 0;
+    const intervalId = setInterval(() => {
+      if (idx < fullGreetingText.length) {
+        const ch = fullGreetingText[idx];
+        idx++;
+        setDisplayText((prev) => prev + ch);
+      } else {
+        clearInterval(intervalId);
+      }
+    }, 60);
+    return () => clearInterval(intervalId);
+  }, [stage, fullGreetingText, showTour, isMobile]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -352,32 +362,24 @@ export default function Home() {
           </div>
           {/* Typing headline */}
           <div className="min-h-[36px] md:min-h-[60px] flex items-center justify-center">
-            <h1 style={{ color: '#111' }} className="text-[26px] md:text-[46px] font-extrabold tracking-[-1px] md:tracking-[-2px] leading-tight flex items-center">
-              <span>{displayText}</span>
-              {!isTypingDone && (
-                <span className="inline-block w-[2.5px] h-[26px] md:h-[46px] ml-1.5 animate-pulse" style={{ background: '#111' }} />
-              )}
+            <h1 style={{ color: '#111' }} className="text-[26px] md:text-[46px] font-extrabold tracking-[-1px] md:tracking-[-2px] leading-tight">
+              Welcome to YHealth AI
             </h1>
           </div>
           {/* CTA — appears only after typing completes */}
           <div className="min-h-[52px] flex items-center">
-            <AnimatePresence>
-              {isTypingDone && (
-                <motion.button
-                  key="cta"
-                  initial={{ opacity: 0, y: 16 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 8 }}
-                  transition={{ duration: 0.45, ease: 'easeOut' }}
-                  onClick={skipWelcome}
-                  className="h-[52px] px-8 rounded-full font-bold text-sm flex items-center gap-2 group cursor-pointer hover:scale-[1.05] active:scale-95 transition-all duration-300"
-                  style={{ background: '#111111', color: '#fff', boxShadow: '0 8px 30px rgba(0,0,0,0.15)' }}
-                >
-                  <span>Get Started</span>
-                  <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform duration-200" />
-                </motion.button>
-              )}
-            </AnimatePresence>
+            <motion.button
+              key="cta"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45, ease: 'easeOut' }}
+              onClick={skipWelcome}
+              className="h-[52px] px-8 rounded-full font-bold text-sm flex items-center gap-2 group cursor-pointer hover:scale-[1.05] active:scale-95 transition-all duration-300"
+              style={{ background: '#111111', color: '#fff', boxShadow: '0 8px 30px rgba(0,0,0,0.15)' }}
+            >
+              <span>Get Started</span>
+              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform duration-200" />
+            </motion.button>
           </div>
         </div>
       </motion.div>
@@ -554,18 +556,12 @@ export default function Home() {
                 <div className="flex flex-col items-center gap-4 md:gap-5 w-full">
                   {/* Greeting — compact */}
                   <motion.div variants={itemVariants} className="flex flex-col items-center gap-1.5 md:gap-2 flex-shrink-0">
-                    <div className="relative flex items-center justify-center z-10 flex-shrink-0">
-                      <div className="absolute w-20 h-20 md:w-24 md:h-24 bg-black/[0.01] dark:bg-white/5 rounded-full logo-glow-silver" />
-                      <div className="relative w-16 h-16 md:w-20 md:h-20 mb-1 rounded-[20px] md:rounded-[24px] bg-white dark:bg-black/60 border border-black/[0.06] dark:border-white/[0.08] flex items-center justify-center p-3 md:p-4 shadow-[0_8px_24px_rgba(0,0,0,0.05)] hover:scale-105 transition-all duration-300">
-                        <img src="/Y-Health.png" alt="YHealth" className="w-full h-full object-contain brightness-0 dark:brightness-100 transition-all duration-300" />
-                      </div>
-                    </div>
                     <div className="text-center max-w-2xl px-2">
-                      <p className="text-[9px] md:text-[10px] text-[#888] dark:text-[#909090] font-semibold mb-1.5 md:mb-2 tracking-widest uppercase">
-                        {heroTagline}
-                      </p>
-                      <h1 className="text-3xl md:text-4xl lg:text-[40px] font-medium tracking-tight bg-gradient-to-b from-[#111111] to-[#444444] dark:from-white dark:via-[#e0e0e0] dark:to-[#c0c0c0] bg-clip-text text-transparent leading-tight" style={{ paddingBottom: '5px' }}>
-                        {getTimeOfDayGreeting(userName)}
+                      <h1 className="text-3xl md:text-4xl lg:text-[40px] font-medium tracking-tight bg-gradient-to-b from-[#111111] to-[#444444] dark:from-white dark:via-[#e0e0e0] dark:to-[#c0c0c0] bg-clip-text text-transparent leading-tight text-center min-h-[80px] md:min-h-[48px]" style={{ paddingBottom: '5px' }}>
+                        <span>{displayText}</span>
+                        {displayText.length < fullGreetingText.length && (!showTour || isMobile) && (
+                          <span className="inline-block w-[2.5px] h-[26px] md:h-[36px] ml-1.5 animate-pulse bg-neutral-800 dark:bg-neutral-200" style={{ verticalAlign: 'middle' }} />
+                        )}
                       </h1>
                     </div>
                   </motion.div>

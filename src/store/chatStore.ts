@@ -716,13 +716,13 @@ Could you rephrase that? Try something like:
 
           const activeStep = onboardingStep === 'not_started' ? 'asked_name' : onboardingStep;
           const activeQuestion = getOnboardingStepQuestion(activeStep, nextProfile);
-          matchedResponse = isFirstTime ? baseGreeting : `${baseGreeting}\n\n${activeQuestion}`;
+          matchedResponse = `${baseGreeting}\n\n${activeQuestion}`;
           nextBotMessageType = 'onboarding_question';
           
           if (onboardingStep === 'not_started') {
             nextStep = 'asked_name';
-            set({ greetingShown: true });
           }
+          set({ greetingShown: true });
         }
         // Scenario 4: Normal Progression (no query, valid answer extracted)
         else if (anyNewExtraction) {
@@ -1216,12 +1216,14 @@ Could you rephrase that? Try something like:
     // LLM generates the welcome — no hardcoded strings
     setTimeout(async () => {
       const welcomeText = await fetchGreetingResponse('hi', true, undefined, []);
+      const activeQuestion = getOnboardingStepQuestion('asked_name', {});
+      const welcomeWithQuestion = `${welcomeText}\n\n${activeQuestion}`;
 
       const assistantMessageId = generateUUIDv7();
       const welcomeMsg: Message = {
         id: assistantMessageId,
         sender: 'assistant',
-        content: welcomeText,
+        content: welcomeWithQuestion,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         created_at: Date.now(),
       };

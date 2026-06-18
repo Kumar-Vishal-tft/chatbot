@@ -462,7 +462,7 @@ export async function fetchGreetingResponse(
   const contextLines: string[] = [];
 
   if (isFirstTime) {
-    contextLines.push("This is the user's very first interaction. Greet them warmly, briefly introduce YHealth as their health assistant, and ask what they should be called.");
+    contextLines.push("This is the user's very first interaction. Greet them warmly and briefly introduce YHealth as their personal clinical health assistant. Do NOT ask for their name, age, or any other onboarding/profile details in your response as the system handles that automatically.");
   } else if (userName) {
     if (hasPersona) {
       contextLines.push(`The user is a registered clinical patient named ${userName} whose health data is synchronized. Greet them warmly and reference that their clinical files are safely loaded. Suggest highly specific action chips matching their clinical history.`);
@@ -482,9 +482,9 @@ ${contextLines.join('\n')}
 Strict rules:
 1. Keep it SHORT: 2-4 lines max. No long paragraphs or lists.
 2. Use a warm, casual, supportive tone. Zero corporate or medical jargon.
-3. If first time: briefly say who you are, what you help with, and ask their name.
+3. Greet them warmly and briefly introduce YHealth as their health assistant. Do NOT ask for their name, age, or any onboarding/profile details in your response.
 4. If returning with name: greet by name warmly and ask how you can help today.
-5. If returning without name: give a warm, brief returning greeting. Do NOT ask for their name, age, or any profile information in your text.
+5. If returning without name: give a warm, brief returning greeting. Do NOT ask for their name, age, or any profile/onboarding information in your text.
 6. NEVER re-introduce the platform on a return greeting.
 7. Every response must end with exactly 3 quick action chips in this exact format on its own line:
    [FollowUps: Suggestion 1 | Suggestion 2 | Suggestion 3]
@@ -493,7 +493,7 @@ Strict rules:
      * Make sure these suggestions feel helpful, professional, and clinical.
    - If no patient profile is loaded, use standard general action chips: "Check Symptoms", "Analyze Report", "Diet Guidance", "Medicine Help".
 8. Make each return greeting feel slightly different — avoid robotic repetition.
-9. WHENEVER you ask for the user's name (e.g., "what should I call you?", "what is your name?"), you MUST format the question in bold Markdown (e.g., **what should I call you?** or **what is your name?**).
+9. Do NOT ask any personal or profiling questions (like "What is your name?" or "How old are you?") as the system will handle asking these automatically.
 10. NEVER use any emojis in your response. Keep the text clean.
 11. Do NOT duplicate or ask any personal questions if this is a return greeting without name, as the state machine appends the question automatically.
 12. Pay close attention to the conversation history. Always remember the context, previous questions, and answers from the last 5 turns of conversation to maintain smooth, context-aware continuity.`;

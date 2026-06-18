@@ -87,8 +87,11 @@ Analyze the user's input and extract any of the following clinical profiling att
    - Output schema: { "valid": boolean, "value": string[] | null, "reason": string }
 
 7. feeling_note (feeling):
-   - Rules: 2 to 500 characters. Reject repeating gibberish.
+   - Rules: 2 to 500 characters. Reject repeating gibberish. Do NOT extract social greetings (like "hi", "hello", "hey", "good morning") or simple filler/acknowledgement words (like "okay", "yes", "no", "thanks") as a feeling_note.
    - Output schema: { "valid": boolean, "value": string | null, "reason": string }
+
+8. General Rule:
+   - Do NOT extract conversational greetings (e.g., "hi", "hello", "hey", "good morning"), filler phrases (e.g., "ok", "yes", "no"), or acknowledgements as name, feeling_note, health_goal, or any other attribute. If the input contains only greetings/fillers, all attributes must have "valid" set to false and "value" set to null.
 
 Output JSON must follow this schema exactly:
 {
