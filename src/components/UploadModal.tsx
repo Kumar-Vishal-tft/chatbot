@@ -157,7 +157,7 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }: Upload
                 type="file"
                 ref={fileInputRef}
                 onChange={handleFileChange}
-                 accept=".pdf,.png,.jpg,.jpeg,.tiff,.doc,.docx"
+                 accept=".pdf,.png,.jpg,.jpeg,.tiff,.doc,.docx,.webp"
                 className="hidden"
               />
 
@@ -184,7 +184,7 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }: Upload
                   <Upload className="w-6 h-6 text-neutral-400 dark:text-neutral-600 stroke-[1.5]" />
                   <div>
                     <span className="text-xs font-bold text-neutral-700 dark:text-neutral-300 block">Click to select file or drag & drop</span>
-                    <span className="text-[10px] text-neutral-400 block mt-0.5">Supports PDF, DOC, DOCX, PNG, JPG, JPEG, TIFF</span>
+                    <span className="text-[10px] text-neutral-400 block mt-0.5">Supports PDF, DOC, DOCX, PNG, JPG, JPEG, WEBP, TIFF</span>
                   </div>
                 </>
               )}
@@ -197,7 +197,7 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }: Upload
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <span className="block text-[9px] text-neutral-450 dark:text-neutral-500">Allowed Formats</span>
-                  <span className="block text-xs font-bold text-neutral-700 dark:text-neutral-300 mt-0.5">PDF, DOC, DOCX, JPEG, PNG, TIFF</span>
+                  <span className="block text-xs font-bold text-neutral-700 dark:text-neutral-300 mt-0.5">PDF, DOC, DOCX, JPEG, PNG, WEBP, TIFF</span>
                 </div>
                 <div>
                   <span className="block text-[9px] text-neutral-450 dark:text-neutral-500">Maximum File Size</span>

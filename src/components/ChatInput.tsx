@@ -1,7 +1,7 @@
 'use client';
 
 import { useChatStore } from '@/store/chatStore';
-import { SendHorizontal, Mic, Lock, Plus, X, FileText, Pill, Image as ImageIcon, Camera, Activity, Sparkles, Smartphone, UserCheck } from 'lucide-react';
+import { SendHorizontal, Mic, Lock, Plus, X, FileText, Pill, Camera, Activity, Sparkles, Smartphone, UserCheck } from 'lucide-react';
 import { useRef, useState, useEffect, useCallback } from 'react';
 import VoiceAssistantPanel from './VoiceAssistantPanel';
 import ScheduleCallModal from './ScheduleCallModal';
@@ -496,17 +496,6 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
             >
               <FileText className="w-4 h-4 text-indigo-500 dark:text-indigo-400 shrink-0 group-hover:scale-110 transition-transform duration-200" />
               <span>Upload Report</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                onAttachClick?.();
-                setIsMenuOpen(false);
-              }}
-              className="group flex items-center gap-3 w-full px-3 py-2 text-xs font-bold text-neutral-750 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-white/[0.04] rounded-xl text-left whitespace-nowrap transition-all duration-200 cursor-pointer"
-            >
-              <ImageIcon className="w-4 h-4 text-emerald-500 dark:text-emerald-400 shrink-0 group-hover:scale-110 transition-transform duration-200" />
-              <span>Medical Image</span>
             </button>
           </div>
         )}
