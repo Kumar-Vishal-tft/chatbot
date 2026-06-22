@@ -7,7 +7,7 @@ import { AnimatePresence } from 'framer-motion';
 interface UploadModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onUploadSuccess: (fileName: string) => void;
+  onUploadSuccess: (fileName: string, extractedProfile?: any, analysisSummary?: string) => void;
 }
 
 export default function UploadModal({ isOpen, onClose, onUploadSuccess }: UploadModalProps) {
@@ -15,13 +15,23 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }: Upload
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isCompleted, setIsCompleted] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const resetState = () => {
+    setSelectedFile(null);
+    setIsUploading(false);
+    setUploadProgress(0);
+    setIsCompleted(false);
+    setErrorMessage(null);
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setSelectedFile(file);
       setIsCompleted(false);
+      setErrorMessage(null);
     }
   };
 
@@ -35,34 +45,70 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }: Upload
     if (file) {
       setSelectedFile(file);
       setIsCompleted(false);
+      setErrorMessage(null);
     }
   };
 
-  const handleUploadSubmit = () => {
+  const handleUploadSubmit = async () => {
     if (!selectedFile) return;
     setIsUploading(true);
-    setUploadProgress(10);
-    
-    let currentProgress = 10;
-    const timer = setInterval(() => {
-      currentProgress += 30;
-      if (currentProgress >= 100) {
-        clearInterval(timer);
+    setErrorMessage(null);
+    setUploadProgress(15);
+
+    // Simulate progress while the backend classifies the document
+    const progressInterval = setInterval(() => {
+      setUploadProgress((prev) => {
+        if (prev >= 85) {
+          clearInterval(progressInterval);
+          return 85;
+        }
+        return prev + 10;
+      });
+    }, 150);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+
+      const response = await fetch('/api/classify', {
+        method: 'POST',
+        body: formData,
+      });
+
+      clearInterval(progressInterval);
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Failed to classify document');
+      }
+
+      const data = await response.json();
+      
+      if (data.is_medical_document === true) {
         setUploadProgress(100);
-        setIsUploading(false);
         setIsCompleted(true);
         
-        // Complete upload, invoke success exactly once, and close modal
+        // Complete upload, invoke success, and close modal
         setTimeout(() => {
-          onUploadSuccess(selectedFile.name);
-          setSelectedFile(null);
-          setIsCompleted(false);
+          onUploadSuccess(selectedFile.name, data.extracted_profile, data.analysis_summary);
+          resetState();
           onClose();
         }, 900);
       } else {
-        setUploadProgress(currentProgress);
+        setIsUploading(false);
+        setUploadProgress(0);
+        setErrorMessage(
+          data.document_type
+            ? `Rejected: The document was classified as a "${data.document_type}" which is not a valid medical report. Please upload a medical document.`
+            : 'Rejected: This file does not appear to be a medical report or document. Please upload a valid medical document.'
+        );
       }
-    }, 200);
+    } catch (err: any) {
+      clearInterval(progressInterval);
+      setIsUploading(false);
+      setUploadProgress(0);
+      setErrorMessage(err.message || 'An error occurred during file classification.');
+    }
   };
 
   return (
@@ -74,8 +120,7 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }: Upload
             <button
               onClick={() => {
                 onClose();
-                setSelectedFile(null);
-                setIsCompleted(false);
+                resetState();
               }}
               className="absolute top-4 right-4 w-8 h-8 rounded-full flex items-center justify-center text-[#666] dark:text-[#aaa] hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition cursor-pointer"
             >
@@ -93,6 +138,14 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }: Upload
               </div>
             </div>
 
+            {/* Inline Error Message */}
+            {errorMessage && (
+              <div className="mt-3 p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-500/20 text-xs font-semibold text-red-600 dark:text-red-400 flex items-start gap-2 animate-fade-in">
+                <span className="flex-shrink-0 w-4 h-4 rounded-full bg-red-100 dark:bg-red-900/50 flex items-center justify-center font-bold">!</span>
+                <span>{errorMessage}</span>
+              </div>
+            )}
+
             {/* Upload Zone */}
             <div
               onDragOver={handleDragOver}
@@ -104,7 +157,7 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }: Upload
                 type="file"
                 ref={fileInputRef}
                 onChange={handleFileChange}
-                 accept=".pdf,.png,.jpg,.jpeg,.tiff"
+                 accept=".pdf,.png,.jpg,.jpeg,.tiff,.doc,.docx"
                 className="hidden"
               />
 
@@ -113,7 +166,7 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }: Upload
                   <div className="w-full bg-neutral-100 dark:bg-neutral-900 h-2 rounded-full overflow-hidden">
                     <div className="bg-black dark:bg-white h-full transition-all duration-200" style={{ width: `${uploadProgress}%` }} />
                   </div>
-                  <span className="text-xs font-bold text-neutral-500 dark:text-neutral-400">Uploading file ({uploadProgress}%)</span>
+                  <span className="text-xs font-bold text-neutral-500 dark:text-neutral-400">Classifying document ({uploadProgress}%)</span>
                 </div>
               ) : isCompleted ? (
                 <div className="flex flex-col items-center justify-center gap-2 py-3 text-emerald-500">
@@ -131,20 +184,20 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }: Upload
                   <Upload className="w-6 h-6 text-neutral-400 dark:text-neutral-600 stroke-[1.5]" />
                   <div>
                     <span className="text-xs font-bold text-neutral-700 dark:text-neutral-300 block">Click to select file or drag & drop</span>
-                    <span className="text-[10px] text-neutral-400 block mt-0.5">Supports PDF, PNG, JPG, JPEG, TIFF</span>
+                    <span className="text-[10px] text-neutral-400 block mt-0.5">Supports PDF, DOC, DOCX, PNG, JPG, JPEG, TIFF</span>
                   </div>
                 </>
               )}
             </div>
 
-            {/* Technical Requirements / Grid */}
+            {/* Technical Specifications */}
             <div className="mt-4 bg-neutral-50 dark:bg-neutral-950/40 border border-neutral-100 dark:border-neutral-900 rounded-2xl p-3.5 flex flex-col gap-2.5">
               <h4 className="text-[10px] font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">File Specifications</h4>
               
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <span className="block text-[9px] text-neutral-450 dark:text-neutral-500">Allowed Formats</span>
-                  <span className="block text-xs font-bold text-neutral-700 dark:text-neutral-300 mt-0.5">PDF, JPEG, PNG, TIFF</span>
+                  <span className="block text-xs font-bold text-neutral-700 dark:text-neutral-300 mt-0.5">PDF, DOC, DOCX, JPEG, PNG, TIFF</span>
                 </div>
                 <div>
                   <span className="block text-[9px] text-neutral-450 dark:text-neutral-500">Maximum File Size</span>
@@ -158,8 +211,7 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }: Upload
               <button
                 onClick={() => {
                   onClose();
-                  setSelectedFile(null);
-                  setIsCompleted(false);
+                  resetState();
                 }}
                 disabled={isUploading}
                 className="flex-1 h-10 rounded-full border border-neutral-200 dark:border-neutral-800 font-bold text-xs hover:bg-neutral-50 dark:hover:bg-neutral-900 transition flex items-center justify-center cursor-pointer disabled:opacity-50"

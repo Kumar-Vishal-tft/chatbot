@@ -8,8 +8,13 @@ const inter = Inter({
 });
 
 export const metadata = {
-  title: 'YHealth AI Assistant',
+  title: 'YChat',
   description: 'Premium AI chatbot interface for YHealth/YoloMed platform',
+  icons: {
+    icon: '/Y-Health.png',
+    shortcut: '/Y-Health.png',
+    apple: '/Y-Health.png',
+  },
 };
 
 export const viewport = {

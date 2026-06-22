@@ -32,7 +32,10 @@ export type AnalyticsEvent =
   | 'onboarding_completed'
   | 'theme_toggled'
   | 'sidebar_toggled'
-  | 'chat_created';
+  | 'chat_created'
+  | 'schedule_call_attempt'
+  | 'schedule_call_success'
+  | 'schedule_call_failed';
 
 export interface AnalyticsPayload {
   utm_source?: string | null;
@@ -111,6 +114,9 @@ export function captureAnalyticsEvent(event: AnalyticsEvent, payload: AnalyticsP
     theme_toggled: 'background: #8b5cf6; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;',
     sidebar_toggled: 'background: #6b7280; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;',
     chat_created: 'background: #3b82f6; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; border: 1px solid #1d4ed8;',
+    schedule_call_attempt: 'background: #0ea5e9; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;',
+    schedule_call_success: 'background: #10b981; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;',
+    schedule_call_failed: 'background: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;',
   };
 
   const currentStyle = badgeStyles[event] || 'background: #6b7280; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;';

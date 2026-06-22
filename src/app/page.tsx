@@ -10,7 +10,7 @@ import LeadCaptureCard, { LeadData } from '@/components/LeadCaptureCard';
 import VerificationPanel, { VerifiedUser } from '@/components/VerificationPanel';
 import UploadModal from '@/components/UploadModal';
 import { useChatStore } from '@/store/chatStore';
-import { syncConversationWithBackend } from '@/store/utils';
+import { syncConversationWithBackend, getNextOnboardingStep } from '@/store/utils';
 import { useRef, useEffect, useState } from 'react';
 import { Stethoscope, FileText, Apple, ArrowRight, UserPlus, HeartPulse, ShieldCheck, Activity, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -674,8 +674,80 @@ export default function Home() {
       <UploadModal
         isOpen={showUpload}
         onClose={() => setShowUpload(false)}
-        onUploadSuccess={(fileName) => {
-          sendMessage(`Analyze my uploaded lab report: "${fileName}"`);
+        onUploadSuccess={(fileName, extractedProfile, analysisSummary) => {
+          if (extractedProfile) {
+            const store = useChatStore.getState();
+            const currentProfile = store.onboardingProfile || {};
+            const nextProfile = { ...currentProfile };
+
+            // Merge non-null, non-empty extracted profile values
+            Object.keys(extractedProfile).forEach((key) => {
+              const val = extractedProfile[key];
+              if (val !== null && val !== undefined) {
+                if (key === 'conditions' && Array.isArray(val) && val.length > 0) {
+                  nextProfile.conditions = Array.from(new Set([...(currentProfile.conditions || []), ...val]));
+                } else if (val !== '') {
+                  nextProfile[key as keyof typeof nextProfile] = val;
+                }
+              }
+            });
+
+            store.setOnboardingProfile(nextProfile);
+
+            if (extractedProfile.name && !store.userName) {
+              useChatStore.setState({ userName: extractedProfile.name });
+            }
+
+            const nextStep = getNextOnboardingStep(nextProfile);
+            store.setOnboardingStep(nextStep);
+
+            if (nextStep === 'completed') {
+              useChatStore.setState({ isVerified: true });
+              localStorage.setItem('yhealth_lead_v1', JSON.stringify({
+                name: nextProfile.name,
+                timestamp: new Date().toISOString(),
+                onboarding: nextProfile,
+              }));
+
+              const sessionUUID = store.sessionId || store.activeChatId || '';
+              const ageNum = parseInt(String(nextProfile.age)) || 0;
+              fetch('/api/leads', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'accept': 'application/json',
+                },
+                body: JSON.stringify({
+                  session_id: sessionUUID,
+                  name: nextProfile.name || '',
+                  age: ageNum,
+                  phone_number: nextProfile.phone_number || '',
+                  email: '',
+                  gender: nextProfile.gender || '',
+                  consent: true,
+                  lead_status: 'New',
+                  health_goal: nextProfile.health_goal || 'General wellness',
+                  utm_source: store.utm_source || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_source') : null) || '',
+                  utm_medium: store.utm_medium || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_medium') : null) || '',
+                  utm_campaign: store.utm_campaign || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_campaign') : null) || 'default',
+                  utm_term: store.utm_term || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_term') : null) || '',
+                  utm_content: store.utm_content || (typeof window !== 'undefined' ? sessionStorage.getItem('utm_content') : null) || '',
+                  additional_details: {
+                    conditions: nextProfile.conditions || [],
+                    feeling_note: nextProfile.feeling_note || '',
+                  },
+                })
+              }).then(res => res.json())
+                .then(data => console.log('Lead submitted via document extraction:', data))
+                .catch(err => console.warn('Failed to submit lead on extraction:', err));
+            }
+          }
+
+          let query = `Analyze my uploaded lab report: "${fileName}"`;
+          if (analysisSummary) {
+            query = `Here is the clinical analysis summary of my uploaded lab report "${fileName}": "${analysisSummary}". Please review these biomarkers and guide me.`;
+          }
+          sendMessage(query);
         }}
       />
     </motion.div>

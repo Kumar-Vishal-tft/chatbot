@@ -4,6 +4,7 @@ import { useChatStore } from '@/store/chatStore';
 import { SendHorizontal, Mic, Lock, Plus, X, FileText, Pill, Image as ImageIcon, Camera, Activity, Sparkles, Smartphone, UserCheck } from 'lucide-react';
 import { useRef, useState, useEffect, useCallback } from 'react';
 import VoiceAssistantPanel from './VoiceAssistantPanel';
+import ScheduleCallModal from './ScheduleCallModal';
 import { captureAnalyticsEvent } from '@/utils/analytics';
 
 /* ─── Typewriter prompts ─────────────────────────────────────── */
@@ -486,39 +487,26 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
               backdrop-blur-xl p-2.5 flex flex-col gap-1.5 animate-fade-in transition-all duration-200"
           >
             <button
-              disabled
-              className="group flex items-center gap-3 w-full px-3 py-2 text-xs font-bold text-neutral-400 dark:text-neutral-500 rounded-xl cursor-not-allowed opacity-60 select-none text-left whitespace-nowrap"
+              type="button"
+              onClick={() => {
+                onAttachClick?.();
+                setIsMenuOpen(false);
+              }}
+              className="group flex items-center gap-3 w-full px-3 py-2 text-xs font-bold text-neutral-750 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-white/[0.04] rounded-xl text-left whitespace-nowrap transition-all duration-200 cursor-pointer"
             >
-              <FileText className="w-4 h-4 text-neutral-300 dark:text-neutral-600 shrink-0" />
-              <span>Upload Report (Coming Soon)</span>
+              <FileText className="w-4 h-4 text-indigo-500 dark:text-indigo-400 shrink-0 group-hover:scale-110 transition-transform duration-200" />
+              <span>Upload Report</span>
             </button>
             <button
-              disabled
-              className="group flex items-center gap-3 w-full px-3 py-2 text-xs font-bold text-neutral-400 dark:text-neutral-500 rounded-xl cursor-not-allowed opacity-60 select-none text-left whitespace-nowrap"
+              type="button"
+              onClick={() => {
+                onAttachClick?.();
+                setIsMenuOpen(false);
+              }}
+              className="group flex items-center gap-3 w-full px-3 py-2 text-xs font-bold text-neutral-750 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-white/[0.04] rounded-xl text-left whitespace-nowrap transition-all duration-200 cursor-pointer"
             >
-              <ImageIcon className="w-4 h-4 text-neutral-300 dark:text-neutral-600 shrink-0" />
-              <span>Medical Image (Coming Soon)</span>
-            </button>
-            <button
-              disabled
-              className="group flex items-center gap-3 w-full px-3 py-2 text-xs font-bold text-neutral-400 dark:text-neutral-500 rounded-xl cursor-not-allowed opacity-60 select-none text-left whitespace-nowrap"
-            >
-              <Pill className="w-4 h-4 text-neutral-300 dark:text-neutral-600 shrink-0" />
-              <span>Scan Medicine (Coming Soon)</span>
-            </button>
-            <button
-              disabled
-              className="group flex items-center gap-3 w-full px-3 py-2 text-xs font-bold text-neutral-400 dark:text-neutral-500 rounded-xl cursor-not-allowed opacity-60 select-none text-left whitespace-nowrap"
-            >
-              <Camera className="w-4 h-4 text-neutral-300 dark:text-neutral-600 shrink-0" />
-              <span>Open Camera (Coming Soon)</span>
-            </button>
-            <button
-              disabled
-              className="group flex items-center gap-3 w-full px-3 py-2 text-xs font-bold text-neutral-400 dark:text-neutral-500 rounded-xl cursor-not-allowed opacity-60 select-none text-left whitespace-nowrap"
-            >
-              <Mic className="w-4 h-4 text-neutral-300 dark:text-neutral-600 shrink-0" />
-              <span>Voice Consultation (Coming Soon)</span>
+              <ImageIcon className="w-4 h-4 text-emerald-500 dark:text-emerald-400 shrink-0 group-hover:scale-110 transition-transform duration-200" />
+              <span>Medical Image</span>
             </button>
           </div>
         )}
@@ -655,8 +643,13 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
         isAISpeaking={isAIResponding}
       />
 
+      <ScheduleCallModal
+        isOpen={ctaModal === 'expert'}
+        onClose={() => setCtaModal(null)}
+      />
+
       {/* CTA Detail Modals */}
-      {ctaModal && (
+      {ctaModal && ctaModal !== 'expert' && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
           <div className="w-full max-w-md bg-white dark:bg-[#0e0e0e] border border-black/10 dark:border-white/10 rounded-3xl p-6 shadow-2xl relative">
             <button
@@ -695,32 +688,6 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
                   </div>
                   <div className="p-3 bg-black/[0.02] dark:bg-white/[0.02] border border-black/5 dark:border-white/5 rounded-2xl text-[11px] text-neutral-500 dark:text-neutral-500">
                     Note: YHealth is an AI health companion. For clinical diagnosis or emergencies, always seek help from a qualified medical professional.
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {ctaModal === 'expert' && (
-              <div className="flex flex-col gap-4 text-left">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 dark:bg-emerald-500/20 flex items-center justify-center">
-                    <Activity className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-                  </div>
-                  <h3 className="text-base font-extrabold text-[#111111] dark:text-white">Speak to YHealth Expert</h3>
-                </div>
-                <div className="text-xs md:text-sm text-neutral-600 dark:text-neutral-400 leading-relaxed flex flex-col gap-3">
-                  <p>
-                    Need clinical coordination or long-term medical advice? Our qualified care managers are here to assist you.
-                  </p>
-                  <div className="flex flex-col gap-2.5 mt-2">
-                    <div className="p-3 bg-black/[0.02] dark:bg-white/[0.02] border border-black/5 dark:border-white/5 rounded-2xl flex flex-col gap-0.5">
-                      <span className="text-[10px] uppercase font-bold text-neutral-400">Email Support</span>
-                      <span className="text-xs font-bold text-[#111111] dark:text-white">care@yhealth.ai</span>
-                    </div>
-                    <div className="p-3 bg-black/[0.02] dark:bg-white/[0.02] border border-black/5 dark:border-white/5 rounded-2xl flex flex-col gap-0.5">
-                      <span className="text-[10px] uppercase font-bold text-neutral-400">Phone Support</span>
-                      <span className="text-xs font-bold text-[#111111] dark:text-white">+1 (800) YHEALTH</span>
-                    </div>
                   </div>
                 </div>
               </div>
