@@ -26,21 +26,43 @@ let abuseTimerInterval: NodeJS.Timeout | null = null;
 
 function isUserQueryOrQuestion(content: string): boolean {
   const trimmed = content.trim().toLowerCase();
+  
+  // If it contains a question mark, it's almost certainly a question/query
+  if (trimmed.includes('?')) return true;
+  
   const words = trimmed.split(/\s+/);
   
+  // If it's a very short response (2 words or less), check if it's a simple value
   if (words.length <= 2) {
     const isSimpleValue = /^(male|female|skip|none|diabetes|hypertension|asthma|obesity|yes|no|nothing|nil|ok|okay|fine|good|bad|\d+)$/i.test(trimmed);
     if (isSimpleValue) return false;
   }
   
+  // Check if it contains explicit question words or action verbs indicating a request
   const containsQuestionWord = /\b(how|what|who|why|where|when|which|can|could|should|would|tell|explain|symptom|treat|prevent|cure|medicine|clinical|advice|tips|help|why)\b/i.test(trimmed);
-  const hasQuestionMark = trimmed.includes('?');
+  if (containsQuestionWord) return true;
+  
+  // Check if the input is a comma-separated list of short onboarding values (e.g. "vishal, 99, male")
+  const parts = trimmed.split(',');
+  if (parts.length >= 2) {
+    const allPartsShort = parts.every(part => part.trim().split(/\s+/).length <= 2);
+    if (allPartsShort) return false;
+  }
+  
+  // If it's a sentence (> 3 words) and contains clinical/health/lifestyle/symptom/habit keywords, classify it as a query
+  const hasHealthKeywords = /\b(pain|hurt|ache|fever|cough|breath|dizzy|blood|glucose|pressure|heart|sugar|diet|nutrition|weight|fitness|exercise|sleep|stress|anxiety|depression|medication|dose|side\s*effect|pill|doctor|clinic|hospital|eat|eating|food|dinner|lunch|breakfast|meal|meals|midnight|night|morning|routine|habit|habits|drink|drinking|water|alcohol|smoke|smoking|workout|gym|run|running|walk|walking)\b/i.test(trimmed);
   const isSentence = words.length > 3;
   
-  return containsQuestionWord || hasQuestionMark || isSentence;
+  return isSentence && hasHealthKeywords;
 }
 
-function getOnboardingStepQuestion(step: OnboardingStep, profile: OnboardingProfile, isAlsoPrefix = false, hasJustNamed = false): string {
+function getOnboardingStepQuestion(
+  step: OnboardingStep,
+  profile: OnboardingProfile,
+  isAlsoPrefix = false,
+  hasJustNamed = false,
+  hasError = false
+): string {
   const greetingPrefix = hasJustNamed && profile.name
     ? `Nice to meet you, **${profile.name}**! Welcome to YHealth — your personal clinical intelligence assistant.\n\n`
     : '';
@@ -49,7 +71,13 @@ function getOnboardingStepQuestion(step: OnboardingStep, profile: OnboardingProf
     // Defensive fallback: treat an unstarted onboarding flow the same as the
     // first real step (asking for the user's name) so callers can never get
     // back an empty string here and leave the user with no next question.
-    return getOnboardingStepQuestion('asked_name', profile, isAlsoPrefix, hasJustNamed);
+    return getOnboardingStepQuestion(
+      'asked_name',
+      profile,
+      isAlsoPrefix,
+      hasJustNamed,
+      hasError
+    );
   }
 
   if (step === 'asked_name') {
@@ -61,25 +89,33 @@ function getOnboardingStepQuestion(step: OnboardingStep, profile: OnboardingProf
       ? `Also — **how old are you?** It helps me tailor my suggestions for you.`
       : `${greetingPrefix}**How old are you?** *(This helps me give you better guidance)*`;
   } else if (step === 'asked_gender') {
-    return isAlsoPrefix
-      ? `Also — **what is your gender?**\n\n[FollowUps: Male | Female | Prefer not to say]`
-      : `${greetingPrefix}Got it.\n\n**What's your gender?**\n\n[FollowUps: Male | Female | Prefer not to say]`;
+    if (isAlsoPrefix) {
+      return `Also — **what is your gender?**\n\n[FollowUps: Male | Female | Prefer not to say]`;
+    }
+    const transitionPrefix = hasError ? '' : 'Got it.\n\n';
+    return `${greetingPrefix}${transitionPrefix}**What's your gender?**\n\n[FollowUps: Male | Female | Prefer not to say]`;
   } else if (step === 'asked_phone') {
-    return isAlsoPrefix
-      ? `Also — **what is your mobile/phone number?**`
-      : `${greetingPrefix}Thanks! **What is your mobile/phone number?** *(This helps me save your secure progress)*`;
+    if (isAlsoPrefix) {
+      return `Also — **what is your mobile/phone number?**`;
+    }
+    const transitionPrefix = hasError ? '' : 'Thanks! ';
+    return `${greetingPrefix}${transitionPrefix}**What is your mobile/phone number?** *(This helps me save your secure progress)*`;
   } else if (step === 'asked_goal') {
     return isAlsoPrefix
       ? `Also — **what would you most like help with?**\n\n[FollowUps: Weight loss | Diabetes | Blood reports | Nutrition | Fitness | General wellness | Hypertension | GLP-1 | Metabolic | Sexual Wellness | Mental Wellness | Longevity]`
       : `${greetingPrefix}**What would you most like help with?**\n\n[FollowUps: Weight loss | Diabetes | Blood reports | Nutrition | Fitness | General wellness | Hypertension | GLP-1 | Metabolic | Sexual Wellness | Mental Wellness | Longevity]`;
   } else if (step === 'asked_conditions') {
-    return isAlsoPrefix
-      ? `Also — **do you have any existing medical conditions?**\n\n[FollowUps: None | Diabetes | Hypertension | Asthma | Obesity | Metabolic health]`
-      : `Noted!\n\n**Do you have any existing medical conditions?** *(Type them out, or choose below)*\n\n[FollowUps: None | Diabetes | Hypertension | Asthma | Obesity | Metabolic health]`;
+    if (isAlsoPrefix) {
+      return `Also — **do you have any existing medical conditions?**\n\n[FollowUps: None | Diabetes | Hypertension | Asthma | Obesity | Metabolic health]`;
+    }
+    const transitionPrefix = hasError ? '' : 'Noted!\n\n';
+    return `${transitionPrefix}**Do you have any existing medical conditions?** *(Type them out, or choose below)*\n\n[FollowUps: None | Diabetes | Hypertension | Asthma | Obesity | Metabolic health]`;
   } else if (step === 'asked_feeling') {
-    return isAlsoPrefix
-      ? `Also — **how are you feeling?**`
-      : `Got it.\n\n**Additional Note on how you are feeling?** *(Type a short note or feel free to say 'N/A' or 'None')*`;
+    if (isAlsoPrefix) {
+      return `Also — **how are you feeling?**`;
+    }
+    const transitionPrefix = hasError ? '' : 'Got it.\n\n';
+    return `${transitionPrefix}**Additional Note on how you are feeling?** *(Type a short note or feel free to say 'N/A' or 'None')*`;
   } else if (step === 'completed') {
     const conditionsSummary =
       profile.conditions && profile.conditions.length > 0
@@ -121,6 +157,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isAbuseBlocked: false,
   abuseRemainingSeconds: 0,
   abuseBlockReason: null,
+  micPermissionStatus: 'unknown',
 
   // ── Conversation State ────────────────────────────────────────────────────
   greetingShown: false,
@@ -149,6 +186,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setSidebarExpanded: (expanded) => set({ sidebarExpanded: expanded }),
 
   // ── Onboarding Setters ────────────────────────────────────────────────────
+  setMicPermissionStatus: (status) => set({ micPermissionStatus: status }),
   setOnboardingProfile: (onboardingProfile) => set({ onboardingProfile }),
   setOnboardingStep: (onboardingStep) => set({ onboardingStep }),
   setIsExistingPatient: (isExistingPatient) => set({ isExistingPatient }),
@@ -662,7 +700,7 @@ Could you rephrase that? Try something like:
           currentStepError = extracted.errors.feeling_note;
         }
 
-        const isQuery = isUserQueryOrQuestion(msgContent);
+        const isQuery = isUserQueryOrQuestion(msgContent) || currentStepError === 'health_question';
 
         // Scenario 1: The user asked a health query or general question
         if (isQuery) {
@@ -691,7 +729,7 @@ Could you rephrase that? Try something like:
         // Scenario 2: Validation error (no query, not a greeting, but has error)
         else if (currentStepError && !isGreeting) {
           const activeStep = onboardingStep === 'not_started' ? 'asked_name' : onboardingStep;
-          const activeQuestion = getOnboardingStepQuestion(activeStep, nextProfile);
+          const activeQuestion = getOnboardingStepQuestion(activeStep, nextProfile, false, false, true);
           matchedResponse = `${currentStepError}\n\n${activeQuestion}`;
           nextBotMessageType = 'onboarding_question';
           nextStep = activeStep;
@@ -737,7 +775,7 @@ Could you rephrase that? Try something like:
         // Scenario 5: Fallback (no extraction, no greeting, not a query)
         else {
           const activeStep = onboardingStep === 'not_started' ? 'asked_name' : onboardingStep;
-          const activeQuestion = getOnboardingStepQuestion(activeStep, nextProfile);
+          const activeQuestion = getOnboardingStepQuestion(activeStep, nextProfile, false, false, true);
           matchedResponse = `I didn't quite get that.\n\n${activeQuestion}`;
           nextStep = activeStep;
           nextBotMessageType = 'onboarding_question';
@@ -1240,6 +1278,20 @@ Could you rephrase that? Try something like:
   loadPersistedChats: async () => {
     if (typeof window === 'undefined') return;
     try {
+      // Query microphone permission status
+      if (navigator.permissions && navigator.permissions.query) {
+        navigator.permissions.query({ name: 'microphone' as PermissionName })
+          .then((permissionStatus) => {
+            set({ micPermissionStatus: permissionStatus.state as any });
+            permissionStatus.onchange = () => {
+              set({ micPermissionStatus: permissionStatus.state as any });
+            };
+          })
+          .catch((err) => {
+            console.warn('Failed to query mic permission status:', err);
+          });
+      }
+
       const savedSessions = localStorage.getItem('yhealth_chat_sessions');
       const savedMessages = localStorage.getItem('yhealth_chat_messages');
       const savedActiveId = localStorage.getItem('yhealth_active_chat_id');

@@ -106,6 +106,7 @@ Output JSON must follow this schema exactly:
   }
 }
 CRITICAL: If an entity is NOT mentioned in the text, you MUST set its "valid" to false, "value" to null, and "reason" to "" (empty string). Do NOT output validation messages for missing or unmentioned fields.
+CRITICAL: If the user's input is a health-related question, health-related statement (e.g., about their diet, sleep, symptoms, habits like eating at midnight, or medical concerns), or general health inquiry instead of answering the current onboarding prompt (indicated by Context Hint), you MUST set the "reason" of the active attribute (e.g. name, gender, age) to "health_question" (and set its "valid" to false and "value" to null).
 Your output must be a clean JSON object. Do not include markdown formatting or preamble.`;
 
     let contextHint = '';

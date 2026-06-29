@@ -99,16 +99,13 @@ export default function ChatMessage({ sender, content, timestamp, isStreaming }:
   const { sendMessage, onboardingStep, userName } = useChatStore();
 
   // Extract custom markup tags before rendering markdown
-  const healthCardsRegex = /\[HealthCardsGrid:\s*([^\]]+)\]/;
-  const followUpsRegex = /\[FollowUps:\s*([^\]]+)\]/;
-
+  const healthCardsRegex = /\[HealthCardsGrid:\s*([^\]]+)\]/i;
   const healthGridMatch = content.match(healthCardsRegex);
-  const followUpsMatch = content.match(followUpsRegex);
 
   // Clean Markdown string
   const cleanContent = content
-    .replace(/\[HealthCardsGrid:\s*[^\]]+\]/g, '')
-    .replace(/\[FollowUps:\s*[^\]]+\]/g, '')
+    .replace(/\[HealthCardsGrid:\s*[^\]]+\]/gi, '')
+    .replace(/\[FollowUps:\s*[^\]]+\]/gi, '')
     .trim();
 
   // Parse diagnostic health cards
@@ -123,14 +120,20 @@ export default function ChatMessage({ sender, content, timestamp, isStreaming }:
     });
   }
 
-  // Parse follow-up question pills
+  // Parse all follow-up question pills case-insensitively
   const followUps: string[] = [];
-  if (followUpsMatch && followUpsMatch[1]) {
-    const parts = followUpsMatch[1].split('|');
-    parts.forEach((part) => {
-      const q = part.trim();
-      if (q) followUps.push(q);
-    });
+  const followUpsRegex = /\[FollowUps:\s*([^\]]+)\]/gi;
+  let match;
+  while ((match = followUpsRegex.exec(content)) !== null) {
+    if (match[1]) {
+      const parts = match[1].split('|');
+      parts.forEach((part) => {
+        const q = part.trim();
+        if (q && !followUps.includes(q)) {
+          followUps.push(q);
+        }
+      });
+    }
   }
 
   const handleCopyCode = (code: string) => {
@@ -271,7 +274,7 @@ export default function ChatMessage({ sender, content, timestamp, isStreaming }:
                 )}
 
                 {/* Follow-up question pills */}
-                {followUps.length > 0 && (onboardingStep === 'completed' || onboardingStep === 'not_started') && (
+                {followUps.length > 0 && (
                   <div className="flex flex-wrap gap-2 mt-4 pt-3 border-t border-black/5 dark:border-white/5">
                     {followUps.map((q, idx) => (
                       <button

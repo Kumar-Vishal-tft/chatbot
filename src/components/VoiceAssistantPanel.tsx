@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Mic, X, Play, Pause, AlertCircle } from 'lucide-react';
+import { Mic, MicOff, X, Play, Pause, AlertCircle, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GoogleGenAI, Modality } from "@google/genai";
 import { YHEALTH_PERSONA } from './persona';
@@ -139,7 +139,7 @@ export default function VoiceAssistantPanel({
     setAudioVolume(0);
   }, []);
 
-  const teardown = useCallback(() => {
+  const teardown = useCallback((preserveError = false) => {
     clearAudio();
     if (micStreamRef.current) {
       micStreamRef.current.getTracks().forEach(t => t.stop());
@@ -161,69 +161,61 @@ export default function VoiceAssistantPanel({
     }
     userSpeechAccumulatedRef.current = "";
     aiSpeechAccumulatedRef.current = "";
-    setState('idle');
+    if (!preserveError) {
+      setState('idle');
+    }
     setAudioVolume(0);
   }, [clearAudio]);
 
-  const startMic = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        video: false
-      });
-      micStreamRef.current = stream;
-      captureAnalyticsEvent('voice_recording_started');
+  const startAudioProcessing = () => {
+    const stream = micStreamRef.current;
+    if (!stream) return;
+    captureAnalyticsEvent('voice_recording_started');
 
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      const micCtx = new AudioCtx({ sampleRate: INPUT_SAMPLE_RATE });
-      const source = micCtx.createMediaStreamSource(stream);
-      const processor = micCtx.createScriptProcessor(1024, 1, 1);
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    const micCtx = new AudioCtx({ sampleRate: INPUT_SAMPLE_RATE });
+    const source = micCtx.createMediaStreamSource(stream);
+    const processor = micCtx.createScriptProcessor(1024, 1, 1);
 
-      source.connect(processor);
-      processor.connect(micCtx.destination);
+    source.connect(processor);
+    processor.connect(micCtx.destination);
 
-      processor.onaudioprocess = (e) => {
-        if (!sessionRef.current) return;
-        const inputData = e.inputBuffer.getChannelData(0);
-        const pcm16 = new Int16Array(inputData.length);
-        
-        // Measure microphone input volume level for waveform animation
-        let sum = 0;
-        for (let i = 0; i < inputData.length; i++) {
-          pcm16[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7fff;
-          sum += inputData[i] * inputData[i];
-        }
+    processor.onaudioprocess = (e) => {
+      if (!sessionRef.current) return;
+      const inputData = e.inputBuffer.getChannelData(0);
+      const pcm16 = new Int16Array(inputData.length);
+      
+      // Measure microphone input volume level for waveform animation
+      let sum = 0;
+      for (let i = 0; i < inputData.length; i++) {
+        pcm16[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7fff;
+        sum += inputData[i] * inputData[i];
+      }
 
-        const rms = Math.sqrt(sum / inputData.length);
-        if (state === 'listening') {
-          // Feed microphone volume directly into the wave graphics
-          setAudioVolume(Math.min(1.0, rms * 5.0));
-        }
+      const rms = Math.sqrt(sum / inputData.length);
+      if (state === 'listening') {
+        // Feed microphone volume directly into the wave graphics
+        setAudioVolume(Math.min(1.0, rms * 5.0));
+      }
 
-        // Reset inactivity timer when user speaks
-        if (rms > 0.005) {
-          lastActivityTimeRef.current = Date.now();
-        }
+      // Reset inactivity timer when user speaks
+      if (rms > 0.005) {
+        lastActivityTimeRef.current = Date.now();
+      }
 
-        const u8 = new Uint8Array(pcm16.buffer);
-        let binary = '';
-        for (let i = 0; i < u8.length; i++) {
-          binary += String.fromCharCode(u8[i]);
-        }
-        const base64 = btoa(binary);
+      const u8 = new Uint8Array(pcm16.buffer);
+      let binary = '';
+      for (let i = 0; i < u8.length; i++) {
+        binary += String.fromCharCode(u8[i]);
+      }
+      const base64 = btoa(binary);
 
-        try {
-          sessionRef.current.sendRealtimeInput({
-            audio: { data: base64, mimeType: `audio/pcm;rate=${INPUT_SAMPLE_RATE}` },
-          });
-        } catch (err) {}
-      };
-    } catch (err: any) {
-      console.error('Mic access denied:', err);
-      setState('error');
-      setConnectionError('Microphone access denied. Please check permissions.');
-      teardown();
-    }
+      try {
+        sessionRef.current.sendRealtimeInput({
+          audio: { data: base64, mimeType: `audio/pcm;rate=${INPUT_SAMPLE_RATE}` },
+        });
+      } catch (err) {}
+    };
   };
 
   const startConnection = useCallback(async () => {
@@ -240,6 +232,27 @@ export default function VoiceAssistantPanel({
     }
 
     try {
+      // 1. Acquire mic stream first if not already active
+      if (!micStreamRef.current) {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          video: false
+        });
+        micStreamRef.current = stream;
+        useChatStore.getState().setMicPermissionStatus('granted');
+        
+        // Listen for track revocation
+        stream.getAudioTracks().forEach(track => {
+          track.onended = () => {
+            console.warn("Microphone track ended/revoked during session.");
+            useChatStore.getState().setMicPermissionStatus('denied');
+            setState('error');
+            setConnectionError('Microphone permission revoked during session.');
+            teardown(true);
+          };
+        });
+      }
+
       await ensurePlaybackCtx();
 
       const hasPersona = !!activePersonaManager.getRawPersona();
@@ -434,7 +447,7 @@ CRITICAL RULES FOR RESPONSES:
                 }
               } catch (e) {}
               
-              startMic();
+              startAudioProcessing();
             });
           },
 
@@ -797,11 +810,11 @@ CRITICAL RULES FOR RESPONSES:
             console.error('Live API error:', err);
             setState('error');
             setConnectionError('Connection lost. Please try again.');
-            teardown();
+            teardown(true);
           },
 
           onclose: () => {
-            teardown();
+            teardown(false);
           }
         }
       });
@@ -811,10 +824,49 @@ CRITICAL RULES FOR RESPONSES:
     } catch (err: any) {
       console.error('Failed to connect to Gemini Live:', err);
       setState('error');
-      setConnectionError(err.message || 'Connection failed.');
-      teardown();
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError' || err.message?.toLowerCase().includes('permission') || err.message?.toLowerCase().includes('denied')) {
+        useChatStore.getState().setMicPermissionStatus('denied');
+        setConnectionError('Microphone access denied. Voice input cannot be used until microphone permission is granted.');
+      } else {
+        setConnectionError(err.message || 'Connection failed.');
+      }
+      teardown(true);
     }
   }, [scheduleAudioChunk, clearAudio, teardown]);
+
+  const handleRetryPermission = async () => {
+    triggerHaptic(20);
+    setState('connecting');
+    setConnectionError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        video: false
+      });
+      micStreamRef.current = stream;
+      useChatStore.getState().setMicPermissionStatus('granted');
+      
+      // Listen for track revocation
+      stream.getAudioTracks().forEach(track => {
+        track.onended = () => {
+          console.warn("Microphone track ended/revoked during session.");
+          useChatStore.getState().setMicPermissionStatus('denied');
+          setState('error');
+          setConnectionError('Microphone permission revoked during session.');
+          teardown(true);
+        };
+      });
+
+      // Proceed to start connection
+      startConnection();
+    } catch (err: any) {
+      console.error('Microphone retry failed:', err);
+      useChatStore.getState().setMicPermissionStatus('denied');
+      setState('error');
+      setConnectionError('Microphone access denied. Voice input cannot be used until microphone permission is granted.');
+      teardown(true);
+    }
+  };
 
   // Reset transcript and connect on fresh open
   useEffect(() => {
@@ -822,13 +874,20 @@ CRITICAL RULES FOR RESPONSES:
       setTranscript('');
       setConnectionError(null);
       triggerHaptic(20);
-      startConnection();
+      
+      const currentStatus = useChatStore.getState().micPermissionStatus;
+      if (currentStatus === 'denied') {
+        setState('error');
+        setConnectionError('Microphone access denied. Voice input cannot be used until microphone permission is granted.');
+      } else {
+        startConnection();
+      }
     } else {
-      teardown();
+      teardown(false);
       setTranscript('');
       setShowConfirmClose(false);
     }
-    return () => teardown();
+    return () => teardown(false);
   }, [isOpen, startConnection, teardown]);
 
   // Visual Waveform Animation Canvas loop
@@ -1089,70 +1148,109 @@ CRITICAL RULES FOR RESPONSES:
               </div>
             </div>
 
-            {/* Body - Center large mic button with volumetric dynamic pulse */}
-            <div className="flex-1 flex flex-col items-center justify-center py-6 relative">
-              
-              <div className="relative w-28 h-28 flex items-center justify-center">
+            {/* Body */}
+            {state === 'error' ? (
+              /* Premium Permission Denied & Error recovery block */
+              <div className="flex-1 flex flex-col items-center justify-center py-6 px-4 text-center">
+                <div className="w-16 h-16 rounded-full bg-red-50 dark:bg-red-950/20 flex items-center justify-center text-red-500 dark:text-red-400 mb-4 animate-pulse">
+                  <MicOff className="w-8 h-8" />
+                </div>
                 
-                {/* Breathing volumetric outer glows synced to audioVolume */}
-                <AnimatePresence>
-                  {(state === 'listening' || state === 'speaking') && (
-                    <>
-                      <motion.div
-                        animate={{ scale: 1.1 + audioVolume * 0.45 }}
-                        transition={{ duration: 0.15, ease: "easeOut" }}
-                        className="absolute inset-0 rounded-full border border-black/10 dark:border-white/10"
-                      />
-                      <motion.div
-                        animate={{ scale: 1.02 + audioVolume * 0.25 }}
-                        transition={{ duration: 0.1, ease: "easeOut" }}
-                        className="absolute inset-0 rounded-full bg-black/[0.02] dark:bg-white/[0.02]"
-                      />
-                    </>
-                  )}
-                </AnimatePresence>
+                <h3 className="text-base font-extrabold text-neutral-900 dark:text-white uppercase tracking-wider mb-2">
+                  Microphone Access Blocked
+                </h3>
+                
+                <p className="text-xs text-neutral-550 dark:text-neutral-400 leading-relaxed mb-6 max-w-[320px]">
+                  {connectionError || 'Microphone access denied. Voice input cannot be used until microphone permission is granted.'}
+                </p>
 
-                {/* Main Mic Button Target - 80px circle */}
-                <motion.div
-                  animate={(state === 'listening' || state === 'speaking') ? {
-                    scale: 1 + audioVolume * 0.08,
-                    boxShadow: [
-                      '0 4px 20px rgba(0,0,0,0.05)',
-                      '0 10px 30px rgba(0,0,0,0.08)',
-                      '0 4px 20px rgba(0,0,0,0.05)'
-                    ]
-                  } : { scale: 1 }}
-                  transition={{ duration: 0.15 }}
-                  className={`w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 relative z-10 cursor-pointer ${
-                    state === 'listening'
-                      ? 'bg-black text-white dark:bg-white dark:text-black shadow-lg'
-                      : state === 'speaking'
-                        ? 'bg-indigo-600 text-white dark:bg-indigo-500 shadow-lg'
-                        : 'bg-neutral-100 text-neutral-400 dark:bg-white/[0.04]'
-                  }`}
-                >
-                  <Mic className={`w-8 h-8 ${state === 'listening' ? 'stroke-[2.5]' : ''}`} />
-                </motion.div>
+                {/* Browser-specific recovery guidance */}
+                <div className="w-full max-w-[340px] bg-neutral-50/50 dark:bg-white/[0.02] border border-black/[0.05] dark:border-white/[0.08] rounded-2xl p-4 text-left mb-6">
+                  <span className="block text-[10px] font-extrabold tracking-wider text-neutral-400 dark:text-neutral-500 uppercase mb-2">
+                    How to restore access:
+                  </span>
+                  <ol className="text-[11px] text-neutral-600 dark:text-neutral-400 space-y-2 list-decimal pl-4">
+                    <li>
+                      <span>Click the lock icon (🔒) or settings controls next to the URL in your browser's address bar.</span>
+                    </li>
+                    <li>
+                      <span>Toggle <strong>Microphone</strong> permission to <strong>Allow</strong>.</span>
+                    </li>
+                    <li>
+                      <span>Click the <strong>Try Again</strong> button below to re-initialize your session.</span>
+                    </li>
+                  </ol>
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleRetryPermission}
+                    className="px-6 py-2.5 rounded-full bg-black hover:bg-neutral-800 dark:bg-white dark:hover:bg-neutral-200 text-white dark:text-black text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer"
+                  >
+                    Try Again
+                  </button>
+                </div>
               </div>
+            ) : (
+              /* Center large mic button with volumetric dynamic pulse */
+              <div className="flex-1 flex flex-col items-center justify-center py-6 relative">
+                
+                <div className="relative w-28 h-28 flex items-center justify-center">
+                  
+                  {/* Breathing volumetric outer glows synced to audioVolume */}
+                  <AnimatePresence>
+                    {(state === 'listening' || state === 'speaking') && (
+                      <>
+                        <motion.div
+                          animate={{ scale: 1.1 + audioVolume * 0.45 }}
+                          transition={{ duration: 0.15, ease: "easeOut" }}
+                          className="absolute inset-0 rounded-full border border-black/10 dark:border-white/10"
+                        />
+                        <motion.div
+                          animate={{ scale: 1.02 + audioVolume * 0.25 }}
+                          transition={{ duration: 0.1, ease: "easeOut" }}
+                          className="absolute inset-0 rounded-full bg-black/[0.02] dark:bg-white/[0.02]"
+                        />
+                      </>
+                    )}
+                  </AnimatePresence>
 
-              {/* Real dynamic audio-synced waveform */}
-              <div className="w-full h-16 mt-4 relative">
-                <canvas ref={canvasRef} className="w-full h-full block" />
-              </div>
+                  {/* Main Mic Button Target - 80px circle */}
+                  <motion.div
+                    animate={(state === 'listening' || state === 'speaking') ? {
+                      scale: 1 + audioVolume * 0.08,
+                      boxShadow: [
+                        '0 4px 20px rgba(0,0,0,0.05)',
+                        '0 10px 30px rgba(0,0,0,0.08)',
+                        '0 4px 20px rgba(0,0,0,0.05)'
+                      ]
+                    } : { scale: 1 }}
+                    transition={{ duration: 0.15 }}
+                    className={`w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 relative z-10 cursor-pointer ${
+                      state === 'listening'
+                        ? 'bg-black text-white dark:bg-white dark:text-black shadow-lg'
+                        : state === 'speaking'
+                          ? 'bg-indigo-600 text-white dark:bg-indigo-500 shadow-lg'
+                          : 'bg-neutral-100 text-neutral-400 dark:bg-white/[0.04]'
+                    }`}
+                  >
+                    <Mic className={`w-8 h-8 ${state === 'listening' ? 'stroke-[2.5]' : ''}`} />
+                  </motion.div>
+                </div>
 
-              {/* Real-time Transcription Stream */}
-              <div className="w-full max-w-[340px] text-center min-h-[48px] px-4 mt-2">
-                {state === 'error' ? (
-                  <p className="text-xs font-semibold text-red-500">
-                    {connectionError || 'An error occurred during secure connection setup.'}
-                  </p>
-                ) : (
+                {/* Real dynamic audio-synced waveform */}
+                <div className="w-full h-16 mt-4 relative">
+                  <canvas ref={canvasRef} className="w-full h-full block" />
+                </div>
+
+                {/* Real-time Transcription Stream */}
+                <div className="w-full max-w-[340px] text-center min-h-[48px] px-4 mt-2">
                   <p className="text-sm font-medium text-neutral-800 dark:text-neutral-200 leading-relaxed italic">
-                    "How can I help you now?"
+                    {transcript ? `"${transcript}"` : '"How can I help you now?"'}
                   </p>
-                )}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Bottom Spacer */}
             <div className="h-4" />

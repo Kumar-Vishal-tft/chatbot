@@ -62,7 +62,7 @@ Rules:
 1. Must be a real human name. Minimum 2 characters.
 2. Must NOT contain digits, numbers, or symbols.
 3. Reject single letters.
-4. If the user asked a health-related question or general medical inquiry instead of answering the name prompt, set "valid": false and set "reason": "health_question".
+4. If the user asked a health-related question, made a health-related statement, or provided a general medical/health/lifestyle inquiry instead of answering the name prompt, set "valid": false and set "reason": "health_question".
 5. If the input is invalid, contains digits, contains symbols, or is gibberish, set "valid": false and set "reason" to a friendly, conversational, natural, and helpful explanation of why the input is invalid (e.g., "Names shouldn't have numbers in it.", "Please enter a name without special characters.", "Please share a name that is at least 2 letters long.", "That doesn't look like a real name. Please enter a valid name."). Do not show emojis in the reason.
 6. If valid, set "valid": true, "normalized": the extracted clean capitalized name, and "reason": "".
 7. Your output must be a clean JSON object. Do not include markdown formatting or preamble.`;
@@ -76,7 +76,7 @@ Rules:
 2. Accept numbers or words representing numbers (e.g., "twenty two" -> "22", "twenty-two" -> "22").
 3. Reject negatives, 0, ages > 110, or non-numeric text that isn't a word-number.
 4. Reject decimal numbers, fractions, or floating point numbers (e.g. "25.5", "25.2", "25.0"). Age must be a whole number (integer) only.
-5. If the user asked a health-related question or general medical inquiry instead of answering the age prompt, set "valid": false and set "reason": "health_question".
+5. If the user asked a health-related question, made a health-related statement, or provided a general medical/health/lifestyle inquiry instead of answering the age prompt, set "valid": false and set "reason": "health_question".
 6. If the input is a decimal or has a point, set "valid": false and set "reason" to "Age must be a whole number (integer). Please enter a valid age.".
 7. If the input is invalid or out of range, set "valid": false and set "reason" to a friendly, conversational explanation (e.g., "Please share a valid age between 5 and 110.", "Ages should be entered as a number."). Do not show emojis in the reason.
 8. If valid, set "valid": true, "normalized": the extracted age as an integer string (e.g. "28"), and "reason": "".
@@ -89,7 +89,7 @@ Analyze the user's input to extract their gender.
 Rules:
 1. Accept any natural phrasing of Male, Female, Non-binary, or Prefer not to say.
    Examples: "I'm a guy" -> "Male", "she/her" -> "Female", "rather not say" -> "Prefer not to say", "skip" -> "Prefer not to say".
-2. If the user asked a health-related question instead of answering, set "valid": false and set "reason": "health_question".
+2. If the user asked a health-related question, made a health-related statement, or provided a general medical/health/lifestyle inquiry instead of answering, set "valid": false and set "reason": "health_question".
 3. If the input is completely unrelated or invalid, set "valid": false and set "reason" to a friendly, conversational suggestion (e.g., "Please select Male, Female, or Prefer not to say."). Do not show emojis in the reason.
 4. If valid, set "valid": true, "normalized": "Male", "Female", or "Prefer not to say", and "reason": "".
 5. Your output must be a clean JSON object. Do not include markdown formatting or preamble.`;
@@ -102,7 +102,7 @@ Rules:
 1. Validate Indian mobile numbers: 10-digit starting with 6–9, with or without a leading 0 or 91 prefix.
 2. Validate international format starting with + and 10–15 total digits.
 3. Strip any spaces, dashes, or non-digit characters before checking, but preserve the leading '+' for international.
-4. If the user asked a health-related question, set "valid": false and set "reason": "health_question".
+4. If the user asked a health-related question, made a health-related statement, or provided a general medical/health/lifestyle inquiry instead of answering, set "valid": false and set "reason": "health_question".
 5. If the input is invalid or not a phone number, set "valid": false and set "reason" to a friendly, conversational explanation (e.g., "That doesn't look like a valid phone number. Please enter a 10-digit mobile number."). Do not show emojis in the reason.
 6. If valid, set "valid": true, "normalized": the clean digits-only string (e.g. "9876543210") or "+country_code..." format, and "reason": "".
 7. Your output must be a clean JSON object. Do not include markdown formatting or preamble.`;
@@ -116,7 +116,7 @@ Rules:
    [Weight loss, Diabetes, Blood reports, Nutrition, Fitness, General wellness, Hypertension, GLP-1, Metabolic, Sexual Wellness, Mental Wellness, Longevity]
 2. Accept natural language (e.g., "I want to get fit" -> "Fitness", "sugar problems" -> "Diabetes", "lose belly fat" -> "Weight loss", "nutrition and diet" -> "Nutrition").
 3. Multiple goals can be matched. Map to all applicable goals.
-4. If the user asked a health-related question instead of answering, set "valid": false and set "reason": "health_question".
+4. If the user asked a health-related question, made a health-related statement, or provided a general medical/health/lifestyle inquiry instead of answering, set "valid": false and set "reason": "health_question".
 5. If the input is completely off-topic or unrelated, set "valid": false and set "reason" to a friendly, conversational explanation (e.g., "Please describe your health goals, such as weight loss or diabetes management."). Do not show emojis in the reason.
 6. If valid, set "valid": true, "normalized": comma-separated matched goals (e.g., "Weight loss, Nutrition"), and "reason": "".
 7. Your output must be a clean JSON object. Do not include markdown formatting or preamble.`;
@@ -131,7 +131,7 @@ Rules:
 2. Accept natural language (e.g., "I have high BP" -> "Hypertension", "overweight" -> "Obesity", "sugar" -> "Diabetes").
 3. If user says none, no, nothing, or similar, map to "None".
 4. Multiple conditions can be matched.
-5. If the user asked a health-related question instead of answering, set "valid": false and set "reason": "health_question".
+5. If the user asked a health-related question, made a health-related statement, or provided a general medical/health/lifestyle inquiry instead of answering, set "valid": false and set "reason": "health_question".
 6. If the input is completely off-topic or unrelated, set "valid": false and set "reason" to a friendly, conversational explanation (e.g., "Please list any medical conditions or specify 'None'."). Do not show emojis in the reason.
 7. If valid, set "valid": true, "normalized": comma-separated matched conditions (e.g. "Diabetes, Hypertension" or "None"), and "reason": "".
 8. Your output must be a clean JSON object. Do not include markdown formatting or preamble.`;
@@ -144,7 +144,7 @@ Rules:
 1. The text must be between 2 and 500 characters.
 2. Reject single characters, strings that are pure HTML/script tags (XSS protection), or gibberish repeated characters (e.g. "aaaaaaa").
 3. Accept any genuine free-text note including "N/A", "fine", or full sentences.
-4. If the user asked a health-related question instead of answering, set "valid": false and set "reason": "health_question".
+4. If the user asked a health-related question, made a health-related statement, or provided a general medical/health/lifestyle inquiry instead of answering, set "valid": false and set "reason": "health_question".
 5. If the input is invalid or unsafe, set "valid": false and set "reason" to a friendly, conversational explanation (e.g., "Please write a brief note about how you feel, between 2 and 500 characters."). Do not show emojis in the reason.
 6. If valid, set "valid": true, "normalized": the cleaned input string, and "reason": "".
 7. Your output must be a clean JSON object. Do not include markdown formatting or preamble.`;

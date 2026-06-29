@@ -1,7 +1,7 @@
 'use client';
 
 import { useChatStore } from '@/store/chatStore';
-import { SendHorizontal, Mic, Lock, Plus, X, FileText, Pill, Camera, Activity, Sparkles, Smartphone, UserCheck } from 'lucide-react';
+import { SendHorizontal, Mic, MicOff, Lock, Plus, X, FileText, Pill, Camera, Activity, Sparkles, Smartphone, UserCheck } from 'lucide-react';
 import { useRef, useState, useEffect, useCallback } from 'react';
 import VoiceAssistantPanel from './VoiceAssistantPanel';
 import ScheduleCallModal from './ScheduleCallModal';
@@ -101,7 +101,7 @@ interface ChatInputProps {
 }
 
 export default function ChatInput({ disabled: externalDisabled = false, onAttachClick, onVerify }: ChatInputProps) {
-  const { sendMessage, isTyping, streamingMessageId, stopStreaming, onboardingStep, isExistingPatient, isVerified, isAbuseBlocked, abuseRemainingSeconds, checkAbuseStatus, sessionId, abuseBlockReason } = useChatStore();
+  const { sendMessage, isTyping, streamingMessageId, stopStreaming, onboardingStep, isExistingPatient, isVerified, isAbuseBlocked, abuseRemainingSeconds, checkAbuseStatus, sessionId, abuseBlockReason, micPermissionStatus } = useChatStore();
   const isAIResponding = isTyping || streamingMessageId !== null;
   const isDisabled = externalDisabled || isAIResponding || isAbuseBlocked;
 
@@ -580,13 +580,19 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
         <button
           onClick={openVoiceAssistant}
           disabled={isDisabled}
-          className="w-9 h-9 md:w-10 md:h-10 flex items-center justify-center rounded-full transition-all duration-300 flex-shrink-0 cursor-pointer self-end mb-0.5 md:mb-1
-            bg-neutral-100 hover:bg-neutral-200 dark:bg-white/[0.04] dark:hover:bg-white/[0.08] text-[#888] dark:text-[#666] hover:text-[#111111] dark:hover:text-white
-            shadow-sm hover:shadow-md hover:scale-105 active:scale-95 disabled:opacity-40"
+          className={`w-9 h-9 md:w-10 md:h-10 flex items-center justify-center rounded-full transition-all duration-300 flex-shrink-0 cursor-pointer self-end mb-0.5 md:mb-1 shadow-sm hover:shadow-md hover:scale-105 active:scale-95 disabled:opacity-40 ${
+            micPermissionStatus === 'denied'
+              ? 'bg-red-50 hover:bg-red-100 dark:bg-red-950/20 dark:hover:bg-red-950/30 text-red-500 dark:text-red-400 border border-red-200/50 dark:border-red-500/20'
+              : 'bg-neutral-100 hover:bg-neutral-200 dark:bg-white/[0.04] dark:hover:bg-white/[0.08] text-[#888] dark:text-[#666] hover:text-[#111111] dark:hover:text-white'
+          }`}
           type="button"
-          title="Open Premium Voice Assistant"
+          title={micPermissionStatus === 'denied' ? "Microphone access blocked. Click to resolve." : "Open Premium Voice Assistant"}
         >
-          <Mic className="w-[18px] h-[18px] stroke-[2]" />
+          {micPermissionStatus === 'denied' ? (
+            <MicOff className="w-[18px] h-[18px] stroke-[2]" />
+          ) : (
+            <Mic className="w-[18px] h-[18px] stroke-[2]" />
+          )}
         </button>
 
         {/* Send / Stop */}

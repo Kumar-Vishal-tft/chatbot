@@ -100,24 +100,7 @@ export default function Navbar() {
                 </div>
               </div>
 
-              {/* Action Buttons */}
-              {!isVerified && onboardingStep !== 'completed' && (
-                <div className="flex flex-col gap-0.5 py-1">
-                  <button
-                    onClick={() => {
-                      startOnboardingConversation();
-                      setShowProfileDropdown(false);
-                    }}
-                    className="w-full flex items-center justify-between py-2 px-2.5 rounded-xl text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/20 text-xs font-bold transition-colors text-left"
-                  >
-                    <span className="flex items-center gap-2">
-                      <Sparkles className="w-4 h-4 text-blue-500" />
-                      Complete Profile
-                    </span>
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              )}
+
               {/* Keep Screen Awake Toggle Option */}
               <div className="flex flex-col gap-1.5 border-t border-black/5 dark:border-white/5 pt-2.5 mt-1">
                 <span className="text-[9px] font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider pl-2.5">
