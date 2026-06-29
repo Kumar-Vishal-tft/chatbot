@@ -3,7 +3,18 @@ import { redis } from '@/lib/redis';
 
 export async function POST(request: NextRequest) {
   try {
-    const { sessionId, sessions, messages, onboardingStep, onboardingProfile, userName, isVerified } = await request.json();
+    const { 
+      sessionId, 
+      sessions, 
+      messages, 
+      onboardingStep, 
+      onboardingProfile, 
+      userName, 
+      isVerified,
+      reportUploadCount,
+      prescriptionUploadCount,
+      isProgramActivated
+    } = await request.json();
 
     if (!sessionId) {
       return NextResponse.json({ error: 'sessionId is required' }, { status: 400 });
@@ -15,7 +26,10 @@ export async function POST(request: NextRequest) {
       onboardingStep,
       onboardingProfile,
       userName,
-      isVerified
+      isVerified,
+      reportUploadCount: reportUploadCount || 0,
+      prescriptionUploadCount: prescriptionUploadCount || 0,
+      isProgramActivated: isProgramActivated || false
     });
     
     // Save to Redis and set TTL of 7 days (604800 seconds) for clean lifecycle management

@@ -3,14 +3,16 @@
 import React, { useState, useRef } from 'react';
 import { X, Upload, File, Shield, CheckCircle2 } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
+import { useChatStore } from '@/store/chatStore';
 
 interface UploadModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onUploadSuccess: (fileName: string, extractedProfile?: any, analysisSummary?: string) => void;
+  onUploadSuccess: (fileName: string, extractedProfile?: any, analysisSummary?: string, type?: 'report' | 'prescription') => void;
+  uploadType?: 'report' | 'prescription';
 }
 
-export default function UploadModal({ isOpen, onClose, onUploadSuccess }: UploadModalProps) {
+export default function UploadModal({ isOpen, onClose, onUploadSuccess, uploadType = 'report' }: UploadModalProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -70,6 +72,17 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }: Upload
       const formData = new FormData();
       formData.append('file', selectedFile);
 
+      try {
+        const store = useChatStore.getState();
+        const sessionId = store.sessionId || store.activeChatId || '';
+        if (sessionId) {
+          formData.append('sessionId', sessionId);
+        }
+        formData.append('uploadType', uploadType);
+      } catch (err) {
+        console.warn('Failed to append sessionId to upload form:', err);
+      }
+
       const response = await fetch('/api/classify', {
         method: 'POST',
         body: formData,
@@ -90,7 +103,7 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }: Upload
         
         // Complete upload, invoke success, and close modal
         setTimeout(() => {
-          onUploadSuccess(selectedFile.name, data.extracted_profile, data.analysis_summary);
+          onUploadSuccess(selectedFile.name, data.extracted_profile, data.analysis_summary, uploadType);
           resetState();
           onClose();
         }, 900);
@@ -133,8 +146,14 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }: Upload
                 <Upload className="w-5 h-5 stroke-[2px]" />
               </div>
               <div>
-                <h3 className="text-lg font-bold tracking-tight leading-none">Upload Lab Report</h3>
-                <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">HIPAA compliant automated biomarker analysis</p>
+                <h3 className="text-lg font-bold tracking-tight leading-none">
+                  {uploadType === 'prescription' ? 'Upload Prescription' : 'Upload Lab Report'}
+                </h3>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+                  {uploadType === 'prescription'
+                    ? 'HIPAA compliant prescription analysis & safety check'
+                    : 'HIPAA compliant automated biomarker analysis'}
+                </p>
               </div>
             </div>
 
@@ -206,6 +225,21 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }: Upload
               </div>
             </div>
 
+            {/* Usage & Entitlements Info */}
+            <div className="mt-3 bg-blue-50/50 dark:bg-blue-950/20 border border-blue-100/50 dark:border-blue-500/20 rounded-2xl p-3.5 flex flex-col gap-2 animate-fade-in">
+              <h4 className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">Usage & Entitlements</h4>
+              <div className="grid grid-cols-2 gap-3 text-left">
+                <div>
+                  <span className="block text-[9px] text-neutral-400 dark:text-neutral-500 uppercase">Free Tier Limits</span>
+                  <span className="block text-xs font-bold text-neutral-700 dark:text-neutral-300 mt-0.5">1 Report & 1 Prescription</span>
+                </div>
+                <div>
+                  <span className="block text-[9px] text-neutral-400 dark:text-neutral-500 uppercase">Program Members</span>
+                  <span className="block text-xs font-bold text-blue-600 dark:text-blue-400 mt-0.5">Unlimited Uploads</span>
+                </div>
+              </div>
+            </div>
+
             {/* Action Buttons */}
             <div className="mt-5 flex items-center gap-3">
               <button
@@ -223,7 +257,7 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }: Upload
                 disabled={!selectedFile || isUploading || isCompleted}
                 className="flex-1 h-10 rounded-full bg-black dark:bg-white text-white dark:text-black font-bold text-xs hover:scale-[1.02] active:scale-[0.98] transition flex items-center justify-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                Analyze Report
+                {uploadType === 'prescription' ? 'Analyze Prescription' : 'Analyze Report'}
               </button>
             </div>
           </div>

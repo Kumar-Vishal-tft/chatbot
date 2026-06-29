@@ -35,7 +35,11 @@ export type AnalyticsEvent =
   | 'chat_created'
   | 'schedule_call_attempt'
   | 'schedule_call_success'
-  | 'schedule_call_failed';
+  | 'schedule_call_failed'
+  | 'upload_limit_reached'
+  | 'upgrade_modal_displayed'
+  | 'program_cta_clicked'
+  | 'schedule_call_clicked';
 
 export interface AnalyticsPayload {
   utm_source?: string | null;
@@ -117,6 +121,10 @@ export function captureAnalyticsEvent(event: AnalyticsEvent, payload: AnalyticsP
     schedule_call_attempt: 'background: #0ea5e9; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;',
     schedule_call_success: 'background: #10b981; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;',
     schedule_call_failed: 'background: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;',
+    upload_limit_reached: 'background: #f43f5e; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;',
+    upgrade_modal_displayed: 'background: #ec4899; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;',
+    program_cta_clicked: 'background: #10b981; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;',
+    schedule_call_clicked: 'background: #0ea5e9; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;',
   };
 
   const currentStyle = badgeStyles[event] || 'background: #6b7280; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;';

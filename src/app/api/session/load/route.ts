@@ -30,7 +30,10 @@ export async function GET(request: NextRequest) {
       onboardingStep: parsed.onboardingStep || 'not_started',
       onboardingProfile: parsed.onboardingProfile || {},
       userName: parsed.userName || '',
-      isVerified: parsed.isVerified || false
+      isVerified: parsed.isVerified || false,
+      reportUploadCount: parsed.reportUploadCount || 0,
+      prescriptionUploadCount: parsed.prescriptionUploadCount || 0,
+      isProgramActivated: parsed.isProgramActivated || false
     });
   } catch (error: any) {
     console.error('Redis load session error:', error);

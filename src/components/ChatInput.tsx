@@ -96,7 +96,7 @@ function useTypewriter(active: boolean) {
 /* ─── Component ──────────────────────────────────────────────── */
 interface ChatInputProps {
   disabled?: boolean;
-  onAttachClick?: () => void;
+  onAttachClick?: (type: 'report' | 'prescription') => void;
   onVerify?: () => void;
 }
 
@@ -489,13 +489,24 @@ export default function ChatInput({ disabled: externalDisabled = false, onAttach
             <button
               type="button"
               onClick={() => {
-                onAttachClick?.();
+                onAttachClick?.('report');
                 setIsMenuOpen(false);
               }}
               className="group flex items-center gap-3 w-full px-3 py-2 text-xs font-bold text-neutral-750 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-white/[0.04] rounded-xl text-left whitespace-nowrap transition-all duration-200 cursor-pointer"
             >
               <FileText className="w-4 h-4 text-indigo-500 dark:text-indigo-400 shrink-0 group-hover:scale-110 transition-transform duration-200" />
               <span>Upload Report</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onAttachClick?.('prescription');
+                setIsMenuOpen(false);
+              }}
+              className="group flex items-center gap-3 w-full px-3 py-2 text-xs font-bold text-neutral-750 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-white/[0.04] rounded-xl text-left whitespace-nowrap transition-all duration-200 cursor-pointer"
+            >
+              <Pill className="w-4 h-4 text-emerald-500 dark:text-emerald-450 shrink-0 group-hover:scale-110 transition-transform duration-200" />
+              <span>Upload Prescription</span>
             </button>
           </div>
         )}

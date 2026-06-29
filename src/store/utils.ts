@@ -52,6 +52,9 @@ export const syncSessionWithRedis = async (
         onboardingProfile: storeState.onboardingProfile,
         userName: storeState.userName,
         isVerified: storeState.isVerified,
+        reportUploadCount: storeState.reportUploadCount,
+        prescriptionUploadCount: storeState.prescriptionUploadCount,
+        isProgramActivated: storeState.isProgramActivated,
       }),
     });
   } catch (err) {

@@ -90,12 +90,16 @@ export interface ChatState {
   abuseRemainingSeconds: number;
   abuseBlockReason: 'abuse' | 'repetition' | null;
   micPermissionStatus: 'prompt' | 'granted' | 'denied' | 'unknown';
+  reportUploadCount: number;
+  prescriptionUploadCount: number;
 
   // Conversation State
   greetingShown: boolean;           // true after first welcome message is displayed
   lastBotMessageType: LastBotMessageType; // prevents duplicate greetings/questions
 
   // Actions
+  incrementReportUploadCount: () => void;
+  incrementPrescriptionUploadCount: () => void;
   setMicPermissionStatus: (status: 'prompt' | 'granted' | 'denied' | 'unknown') => void;
   setAbuseBlocked: (blocked: boolean, remainingSeconds?: number, reason?: 'abuse' | 'repetition' | null) => void;
   checkAbuseStatus: () => Promise<void>;

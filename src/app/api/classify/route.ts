@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import mammoth from 'mammoth';
+import { redis } from '@/lib/redis';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
 
@@ -31,6 +32,36 @@ export async function POST(request: NextRequest) {
 
     if (!file || !(file instanceof File)) {
       return NextResponse.json({ success: false, detail: 'No file uploaded' }, { status: 400 });
+    }
+
+    const sessionId = formData.get('sessionId') as string | null;
+    const uploadType = formData.get('uploadType') as string | null || 'report';
+
+    // Server-side entitlement validation
+    if (sessionId) {
+      const sessionRaw = await redis.get(`session:${sessionId}`);
+      if (sessionRaw) {
+        try {
+          const session = JSON.parse(sessionRaw);
+          const isProgram = session.isProgramActivated === true;
+          
+          if (!isProgram) {
+            const count = uploadType === 'prescription' 
+              ? (session.prescriptionUploadCount || 0)
+              : (session.reportUploadCount || 0);
+
+            if (count >= 1) {
+              console.warn(`[Entitlement Gate] User reached upload quota for ${uploadType} on session ${sessionId}. Blocking API request.`);
+              return NextResponse.json({
+                success: false,
+                detail: `You have reached the maximum allowed free uploads of 1 ${uploadType === 'prescription' ? 'prescription' : 'report'}. Please upgrade to a YHealth program to continue.`
+              }, { status: 403 });
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to parse session raw data in classify gate:', e);
+        }
+      }
     }
 
     const backendUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://72.61.241.48:8000';
@@ -89,8 +120,6 @@ export async function POST(request: NextRequest) {
           contentsParts.push({ inlineData: { mimeType, data: base64Data } });
         }
 
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
-        
         const systemInstruction = `You are a clinical document intelligence assistant.
 Analyze the uploaded medical report/document. Perform two tasks:
 1. Extract patient profile details if they are visible in the document:
@@ -119,36 +148,59 @@ Output must be a clean JSON object following this schema:
 }
 Do not include markdown code blocks or any conversational text. Output only raw JSON.`;
 
-        const geminiRes = await fetch(geminiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                { text: "Analyze the uploaded document, extract patient details and generate a clinical summary." },
-                ...contentsParts
-              ]
-            }],
-            systemInstruction: { parts: [{ text: systemInstruction }] },
-            generationConfig: {
-              responseMimeType: "application/json",
-              temperature: 0.1,
-              maxOutputTokens: 1024,
-            }
-          })
-        });
+        // Attempt extraction with model fallback
+        const modelsToTry = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'];
+        let geminiRes = null;
+        let successfulModel = '';
 
-        if (geminiRes.ok) {
+        for (const model of modelsToTry) {
+          try {
+            const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+            console.log(`Extracting details from "${file.name}" via Gemini model "${model}"...`);
+            
+            const attemptRes = await fetch(geminiUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{
+                  parts: [
+                    { text: "Analyze the uploaded document, extract patient details and generate a clinical summary." },
+                    ...contentsParts
+                  ]
+                }],
+                systemInstruction: { parts: [{ text: systemInstruction }] },
+                generationConfig: {
+                  responseMimeType: "application/json",
+                  temperature: 0.1,
+                  maxOutputTokens: 1024,
+                }
+              })
+            });
+
+            if (attemptRes.ok) {
+              geminiRes = attemptRes;
+              successfulModel = model;
+              break;
+            } else {
+              const errText = await attemptRes.text();
+              console.warn(`Gemini extraction failed for model "${model}" (Status ${attemptRes.status}): ${errText}`);
+            }
+          } catch (modelErr) {
+            console.error(`Exception using Gemini model "${model}":`, modelErr);
+          }
+        }
+
+        if (geminiRes && geminiRes.ok) {
           const geminiData = await geminiRes.json();
           const replyText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
           if (replyText) {
             const parsed = JSON.parse(replyText.trim());
             extractedProfile = parsed.extracted_profile || null;
             analysisSummary = parsed.analysis_summary || '';
-            console.log('Successfully extracted profile details from document:', extractedProfile);
+            console.log(`Successfully extracted profile details using model "${successfulModel}":`, extractedProfile);
           }
         } else {
-          console.warn('Gemini extraction call returned status:', geminiRes.status);
+          console.error('All Gemini extraction models failed.');
         }
       } catch (err) {
         console.error('Failed to extract patient details via Gemini:', err);

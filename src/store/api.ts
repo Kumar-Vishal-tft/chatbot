@@ -291,23 +291,26 @@ Remember: Be warm, clear, and genuinely helpful. Always recommend seeing a docto
   const cacheName = await getOrCreateGeminiCache(systemInstruction, 'models/gemini-2.5-flash-lite');
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
     let response;
     let data;
     let attempts = 0;
     const maxAttempts = 2;
     let trimmed = '';
+    let lastUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
 
     while (attempts < maxAttempts) {
       try {
         attempts++;
+        const model = attempts === 1 ? 'gemini-2.5-flash-lite' : 'gemini-2.5-flash';
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+        lastUrl = url;
 
         const requestBody: any = {
           contents: mappedHistory,
           generationConfig: { temperature: 0.85, maxOutputTokens: 1024 },
         };
 
-        if (cacheName) {
+        if (cacheName && model === 'gemini-2.5-flash-lite') {
           requestBody.cachedContent = cacheName;
         } else {
           requestBody.systemInstruction = { parts: [{ text: systemInstruction }] };
@@ -392,7 +395,7 @@ Use standard Markdown formatting (lists, bolding, headers, tables, strategic ale
                 systemInstruction: { parts: [{ text: finalInstruction }] }
               };
 
-              const finalResponse = await fetch(url, {
+              const finalResponse = await fetch(lastUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(finalRequestBody),
@@ -420,7 +423,7 @@ Use standard Markdown formatting (lists, bolding, headers, tables, strategic ale
           ''
         );
         try {
-          const retryResponse = await fetch(url, {
+          const retryResponse = await fetch(lastUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -541,14 +544,15 @@ Strict rules:
     while (attempts < maxAttempts) {
       try {
         attempts++;
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
+        const model = attempts === 1 ? 'gemini-2.5-flash-lite' : 'gemini-2.5-flash';
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
 
         const requestBody: any = {
           contents: mappedHistory,
           generationConfig: { temperature: 0.9, maxOutputTokens: 1024 },
         };
 
-        if (cacheName) {
+        if (cacheName && model === 'gemini-2.5-flash-lite') {
           requestBody.cachedContent = cacheName;
         } else {
           requestBody.systemInstruction = { parts: [{ text: systemInstruction }] };

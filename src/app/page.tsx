@@ -9,6 +9,8 @@ import TourTooltip from '@/components/TourTooltip';
 import LeadCaptureCard, { LeadData } from '@/components/LeadCaptureCard';
 import VerificationPanel, { VerifiedUser } from '@/components/VerificationPanel';
 import UploadModal from '@/components/UploadModal';
+import LimitModal from '@/components/LimitModal';
+import ScheduleCallModal from '@/components/ScheduleCallModal';
 import { useChatStore } from '@/store/chatStore';
 import { syncConversationWithBackend, getNextOnboardingStep } from '@/store/utils';
 import { useRef, useEffect, useState } from 'react';
@@ -95,7 +97,9 @@ export default function Home() {
     persona,
     isProgramActivated,
     activateProgram,
-    isRestoring
+    isRestoring,
+    reportUploadCount,
+    prescriptionUploadCount
   } = useChatStore();
 
   const utmCampaign = (typeof window !== 'undefined' ? sessionStorage.getItem('utm_campaign') : null) || 'default';
@@ -114,6 +118,10 @@ export default function Home() {
   const [showTour, setShowTour] = useState(false);
   const [showVerification, setShowVerification] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
+  const [uploadType, setUploadType] = useState<'report' | 'prescription'>('report');
+  const [showLimitModal, setShowLimitModal] = useState(false);
+  const [limitModalType, setLimitModalType] = useState<'report' | 'prescription'>('report');
+  const [showScheduleCall, setShowScheduleCall] = useState(false);
   const [bannerVisible, setBannerVisible] = useState(false);
   const [showExistingPatientCard, setShowExistingPatientCard] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -645,9 +653,23 @@ export default function Home() {
             )}
           </AnimatePresence>
           <ChatInput 
-            onAttachClick={() => {
-              captureAnalyticsEvent('upload_clicked');
-              setShowUpload(true);
+            onAttachClick={(type) => {
+              captureAnalyticsEvent('upload_clicked', { type });
+              if (isProgramActivated) {
+                setUploadType(type);
+                setShowUpload(true);
+              } else {
+                const count = type === 'prescription' ? prescriptionUploadCount : reportUploadCount;
+                if (count >= 1) {
+                  setLimitModalType(type);
+                  setShowLimitModal(true);
+                  captureAnalyticsEvent('upload_limit_reached', { type });
+                  captureAnalyticsEvent('upgrade_modal_displayed', { type });
+                } else {
+                  setUploadType(type);
+                  setShowUpload(true);
+                }
+              }
             }} 
             onVerify={() => {
               captureAnalyticsEvent('verify_mobile_clicked');
@@ -674,9 +696,19 @@ export default function Home() {
       <UploadModal
         isOpen={showUpload}
         onClose={() => setShowUpload(false)}
-        onUploadSuccess={(fileName, extractedProfile, analysisSummary) => {
+        uploadType={uploadType}
+        onUploadSuccess={(fileName, extractedProfile, analysisSummary, type) => {
+          const activeType = type || uploadType;
+          const store = useChatStore.getState();
+
+          // Increment count
+          if (activeType === 'prescription') {
+            store.incrementPrescriptionUploadCount();
+          } else {
+            store.incrementReportUploadCount();
+          }
+
           if (extractedProfile) {
-            const store = useChatStore.getState();
             const currentProfile = store.onboardingProfile || {};
             const nextProfile = { ...currentProfile };
 
@@ -743,12 +775,30 @@ export default function Home() {
             }
           }
 
-          let query = `Analyze my uploaded lab report: "${fileName}"`;
+          let query = activeType === 'prescription'
+            ? `Analyze my uploaded medical prescription: "${fileName}"`
+            : `Analyze my uploaded lab report: "${fileName}"`;
           if (analysisSummary) {
-            query = `Here is the clinical analysis summary of my uploaded lab report "${fileName}": "${analysisSummary}". Please review these biomarkers and guide me.`;
+            query = activeType === 'prescription'
+              ? `Here is the clinical analysis summary of my uploaded medical prescription "${fileName}": "${analysisSummary}". Please review this prescription and guide me.`
+              : `Here is the clinical analysis summary of my uploaded lab report "${fileName}": "${analysisSummary}". Please review these biomarkers and guide me.`;
           }
           sendMessage(query);
         }}
+      />
+
+      {/* Freemium limit check / Upgrade modal */}
+      <LimitModal
+        isOpen={showLimitModal}
+        onClose={() => setShowLimitModal(false)}
+        type={limitModalType}
+        onScheduleCall={() => setShowScheduleCall(true)}
+      />
+
+      {/* Schedule Call Modal */}
+      <ScheduleCallModal
+        isOpen={showScheduleCall}
+        onClose={() => setShowScheduleCall(false)}
       />
     </motion.div>
   );

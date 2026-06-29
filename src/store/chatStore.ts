@@ -158,6 +158,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   abuseRemainingSeconds: 0,
   abuseBlockReason: null,
   micPermissionStatus: 'unknown',
+  reportUploadCount: 0,
+  prescriptionUploadCount: 0,
 
   // ── Conversation State ────────────────────────────────────────────────────
   greetingShown: false,
@@ -187,6 +189,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // ── Onboarding Setters ────────────────────────────────────────────────────
   setMicPermissionStatus: (status) => set({ micPermissionStatus: status }),
+  incrementReportUploadCount: () => set((state) => ({ reportUploadCount: state.reportUploadCount + 1 })),
+  incrementPrescriptionUploadCount: () => set((state) => ({ prescriptionUploadCount: state.prescriptionUploadCount + 1 })),
   setOnboardingProfile: (onboardingProfile) => set({ onboardingProfile }),
   setOnboardingStep: (onboardingStep) => set({ onboardingStep }),
   setIsExistingPatient: (isExistingPatient) => set({ isExistingPatient }),
@@ -1296,6 +1300,9 @@ Could you rephrase that? Try something like:
       const savedMessages = localStorage.getItem('yhealth_chat_messages');
       const savedActiveId = localStorage.getItem('yhealth_active_chat_id');
 
+      const savedReportUploadCount = localStorage.getItem('yhealth_report_uploads_count');
+      const savedPrescriptionUploadCount = localStorage.getItem('yhealth_prescription_uploads_count');
+
       // Hydrate onboarding state from LocalStorage first (instant recovery)
       const savedOnboardingStep = localStorage.getItem('yhealth_onboarding_step') as any;
       const savedOnboardingProfile = localStorage.getItem('yhealth_onboarding_profile');
@@ -1312,7 +1319,14 @@ Could you rephrase that? Try something like:
           onboardingStep: correctedStep,
           onboardingProfile: parsedProfile,
           userName: savedUserName || '',
-          isVerified: savedIsVerified ? JSON.parse(savedIsVerified) : false
+          isVerified: savedIsVerified ? JSON.parse(savedIsVerified) : false,
+          reportUploadCount: savedReportUploadCount ? parseInt(savedReportUploadCount) : 0,
+          prescriptionUploadCount: savedPrescriptionUploadCount ? parseInt(savedPrescriptionUploadCount) : 0,
+        });
+      } else {
+        set({
+          reportUploadCount: savedReportUploadCount ? parseInt(savedReportUploadCount) : 0,
+          prescriptionUploadCount: savedPrescriptionUploadCount ? parseInt(savedPrescriptionUploadCount) : 0,
         });
       }
       
@@ -1345,7 +1359,10 @@ Could you rephrase that? Try something like:
                 onboardingStep: data.onboardingStep ? correctedRedisStep : get().onboardingStep,
                 onboardingProfile: data.onboardingProfile ? redisProfile : get().onboardingProfile,
                 userName: data.userName !== undefined ? data.userName : get().userName,
-                isVerified: data.isVerified !== undefined ? data.isVerified : get().isVerified
+                isVerified: data.isVerified !== undefined ? data.isVerified : get().isVerified,
+                reportUploadCount: data.reportUploadCount !== undefined ? data.reportUploadCount : get().reportUploadCount,
+                prescriptionUploadCount: data.prescriptionUploadCount !== undefined ? data.prescriptionUploadCount : get().prescriptionUploadCount,
+                isProgramActivated: data.isProgramActivated !== undefined ? data.isProgramActivated : get().isProgramActivated,
               });
               // Update local cache to be in sync
               saveChatState(data.sessions, data.messages, sessionId);
@@ -1417,6 +1434,8 @@ if (typeof window !== 'undefined') {
       localStorage.setItem('yhealth_onboarding_profile', JSON.stringify(state.onboardingProfile || {}));
       localStorage.setItem('yhealth_userName', state.userName || '');
       localStorage.setItem('yhealth_isVerified', JSON.stringify(state.isVerified || false));
+      localStorage.setItem('yhealth_report_uploads_count', String(state.reportUploadCount || 0));
+      localStorage.setItem('yhealth_prescription_uploads_count', String(state.prescriptionUploadCount || 0));
     } catch (e) {
       console.error('Error saving onboarding state to localStorage:', e);
     }
