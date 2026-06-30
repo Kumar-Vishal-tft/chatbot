@@ -902,12 +902,21 @@ export async function extractOnboardingEntities(
     }
   }
 
-  // 2. Context-aware/Fallback: Age
-  if (!res.age && (!currentStep || currentStep === 'asked_age' || content.includes(','))) {
-    const ageMatches = content.match(/\b\d{1,3}\b/g);
-    if (ageMatches && !lower.includes('.') && !lower.includes('point') && !lower.includes('half')) {
-      for (const match of ageMatches) {
-        const ageVal = parseInt(match, 10);
+  // 2. Context-aware/Fallback: Age (Allow extraction unconditionally to support out-of-order/random profile info)
+  if (!res.age) {
+    const ageRegex = /\b\d{1,3}\b/g;
+    let match;
+    while ((match = ageRegex.exec(content)) !== null) {
+      const matchStr = match[0];
+      const idx = match.index;
+      const beforeChar = idx > 0 ? content[idx - 1] : '';
+      const afterChar = idx + matchStr.length < content.length ? content[idx + matchStr.length] : '';
+      if (beforeChar === '.' || afterChar === '.') {
+        continue;
+      }
+
+      if (!lower.includes('point') && !lower.includes('half')) {
+        const ageVal = parseInt(matchStr, 10);
         if (ageVal >= 5 && ageVal <= 110) {
           res.age = ageVal.toString();
           break;
@@ -916,15 +925,15 @@ export async function extractOnboardingEntities(
     }
   }
 
-  // 3. Context-aware/Fallback: Gender
-  if (!res.gender && (!currentStep || currentStep === 'asked_gender' || content.includes(','))) {
+  // 3. Context-aware/Fallback: Gender (Allow extraction unconditionally to support out-of-order/random profile info)
+  if (!res.gender) {
     if (/\b(male|boy|man|guy)\b/.test(lower)) res.gender = 'Male';
     else if (/\b(female|girl|woman|lady)\b/.test(lower)) res.gender = 'Female';
     else if (/\b(prefer not|rather not|skip|none)\b/.test(lower)) res.gender = 'Prefer not to say';
   }
 
-  // 4. Context-aware/Fallback: Phone Number
-  if (!res.phone_number && (!currentStep || currentStep === 'asked_phone' || content.includes(','))) {
+  // 4. Context-aware/Fallback: Phone Number (Allow extraction unconditionally to support out-of-order/random profile info)
+  if (!res.phone_number) {
     const phoneMatch = content.replace(/[-\s]/g, '').match(/\+?\d{10,15}/);
     if (phoneMatch) {
       const normalizedPhone = validateAndNormalizePhone(phoneMatch[0]);

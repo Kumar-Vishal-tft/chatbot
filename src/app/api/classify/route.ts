@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import mammoth from 'mammoth';
 import { redis } from '@/lib/redis';
+import fs from 'fs';
+import path from 'path';
+import { execSync } from 'child_process';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
 
@@ -25,6 +28,17 @@ function extractPrintableStrings(buffer: Buffer): string {
   return result;
 }
 
+function cleanJsonString(str: string): string {
+  let cleaned = str.trim();
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```(?:json)?\n?/i, '');
+  }
+  if (cleaned.endsWith('```')) {
+    cleaned = cleaned.replace(/\n?```$/i, '');
+  }
+  return cleaned.trim();
+}
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
@@ -36,6 +50,7 @@ export async function POST(request: NextRequest) {
 
     const sessionId = formData.get('sessionId') as string | null;
     const uploadType = formData.get('uploadType') as string | null || 'report';
+    const password = formData.get('password') as string | null;
 
     // Server-side entitlement validation
     if (sessionId) {
@@ -69,6 +84,9 @@ export async function POST(request: NextRequest) {
 
     const outgoingFormData = new FormData();
     outgoingFormData.append('file', file, file.name);
+    if (password) {
+      outgoingFormData.append('password', password);
+    }
 
     console.log(`Forwarding classification for "${file.name}" to: ${targetUrl}`);
 
@@ -90,6 +108,15 @@ export async function POST(request: NextRequest) {
     console.log('Classification response data:', data);
 
     const isMedical = data.is_medical_document === true;
+
+    // Check if the file is password-protected and prompt for password
+    if (!isMedical && data.message && data.message.toLowerCase().includes('password')) {
+      return NextResponse.json({
+        success: true,
+        is_password_protected: true,
+        message: data.message
+      });
+    }
 
     // If it is a medical document and we have a Gemini API key, let's analyze it and extract patient details
     let extractedProfile = null;
@@ -113,8 +140,30 @@ export async function POST(request: NextRequest) {
           console.log('Parsing binary .doc file using printable strings extractor...');
           const textContent = extractPrintableStrings(buffer);
           contentsParts.push({ text: `Here is the extracted text content of the uploaded Word document:\n\n${textContent}` });
+        } else if (fileNameLower.endsWith('.pdf')) {
+          console.log('Decrypting PDF file using pdftocairo...');
+          const tempPdfPath = path.join('/tmp', `${Date.now()}-${file.name}`);
+          const decryptedPdfPath = tempPdfPath + '-decrypted.pdf';
+          try {
+            fs.writeFileSync(tempPdfPath, buffer);
+            const pwdArg = password ? `-upw "${password.replace(/"/g, '\\"')}"` : '';
+            execSync(`pdftocairo -pdf ${pwdArg} "${tempPdfPath}" "${decryptedPdfPath}"`, { stdio: 'ignore' });
+            
+            const decryptedBuffer = fs.readFileSync(decryptedPdfPath);
+            const base64Data = decryptedBuffer.toString('base64');
+            contentsParts.push({ inlineData: { mimeType: 'application/pdf', data: base64Data } });
+            console.log('Successfully decrypted PDF using pdftocairo and read buffer');
+          } catch (err) {
+            console.warn('Failed to decrypt PDF using pdftocairo, falling back to original base64 inlineData', err);
+            const base64Data = buffer.toString('base64');
+            const mimeType = file.type || 'application/pdf';
+            contentsParts.push({ inlineData: { mimeType, data: base64Data } });
+          } finally {
+            try { fs.unlinkSync(tempPdfPath); } catch {}
+            try { fs.unlinkSync(decryptedPdfPath); } catch {}
+          }
         } else {
-          // Fallback to sending base64 inlineData for PDFs and images
+          // Fallback to sending base64 inlineData for images
           const base64Data = buffer.toString('base64');
           const mimeType = file.type || 'application/pdf';
           contentsParts.push({ inlineData: { mimeType, data: base64Data } });
@@ -172,7 +221,7 @@ Do not include markdown code blocks or any conversational text. Output only raw 
                 generationConfig: {
                   responseMimeType: "application/json",
                   temperature: 0.1,
-                  maxOutputTokens: 1024,
+                  maxOutputTokens: 8192,
                 }
               })
             });
@@ -194,10 +243,15 @@ Do not include markdown code blocks or any conversational text. Output only raw 
           const geminiData = await geminiRes.json();
           const replyText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
           if (replyText) {
-            const parsed = JSON.parse(replyText.trim());
-            extractedProfile = parsed.extracted_profile || null;
-            analysisSummary = parsed.analysis_summary || '';
-            console.log(`Successfully extracted profile details using model "${successfulModel}":`, extractedProfile);
+            const cleaned = cleanJsonString(replyText);
+            try {
+              const parsed = JSON.parse(cleaned);
+              extractedProfile = parsed.extracted_profile || null;
+              analysisSummary = parsed.analysis_summary || '';
+              console.log(`Successfully extracted profile details using model "${successfulModel}":`, extractedProfile);
+            } catch (jsonErr) {
+              console.error(`Failed to parse Gemini response as JSON. Cleaned reply:\n${cleaned}`, jsonErr);
+            }
           }
         } else {
           console.error('All Gemini extraction models failed.');

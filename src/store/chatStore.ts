@@ -50,7 +50,7 @@ function isUserQueryOrQuestion(content: string): boolean {
   }
   
   // If it's a sentence (> 3 words) and contains clinical/health/lifestyle/symptom/habit keywords, classify it as a query
-  const hasHealthKeywords = /\b(pain|hurt|ache|fever|cough|breath|dizzy|blood|glucose|pressure|heart|sugar|diet|nutrition|weight|fitness|exercise|sleep|stress|anxiety|depression|medication|dose|side\s*effect|pill|doctor|clinic|hospital|eat|eating|food|dinner|lunch|breakfast|meal|meals|midnight|night|morning|routine|habit|habits|drink|drinking|water|alcohol|smoke|smoking|workout|gym|run|running|walk|walking)\b/i.test(trimmed);
+  const hasHealthKeywords = /\b(pain|hurt|ache|fever|cough|breath|dizzy|blood|glucose|pressure|heart|sugar|diet|nutrition|weight|fitness|exercise|sleep|stress|anxiety|depression|medication|dose|side\s*effect|pill|doctor|clinic|hospital|eat|eating|food|dinner|lunch|breakfast|meal|meals|midnight|night|morning|routine|habit|habits|drink|drinking|water|alcohol|smoke|smoking|workout|gym|run|running|walk|walking|hba1c|a1c|hb|bp|cholesterol|thyroid|creatinine|insulin|report|reports|diagnostic|test|tests|scan|scans|lab|labs|diabetic|asthmatic|obese|symptom|symptoms|disease|illness|medical|health|wellness|clinical|physician|gp|cgm|sensor|reading|readings|mg\/dl|mmhg|bpm|fatty\s*liver|kidney|uric\s*acid)\b/i.test(trimmed);
   const isSentence = words.length > 3;
   
   return isSentence && hasHealthKeywords;
@@ -704,6 +704,42 @@ Could you rephrase that? Try something like:
           currentStepError = extracted.errors.feeling_note;
         }
 
+        const stepToField: Record<string, string> = {
+          'not_started': 'name',
+          'asked_name': 'name',
+          'asked_age': 'age',
+          'asked_gender': 'gender',
+          'asked_phone': 'phone_number',
+          'asked_goal': 'health_goal',
+          'asked_conditions': 'conditions',
+          'asked_feeling': 'feeling_note',
+          'completed': '',
+        };
+
+        const getOutOrderAcknowledgment = (nextP: OnboardingProfile, prevP: OnboardingProfile, step: OnboardingStep): string => {
+          const newlyExtracted: string[] = [];
+          if (nextP.name && !prevP.name) newlyExtracted.push('name');
+          if (nextP.age && !prevP.age) newlyExtracted.push('age');
+          if (nextP.gender && !prevP.gender) newlyExtracted.push('gender');
+          if (nextP.phone_number && !prevP.phone_number) newlyExtracted.push('phone_number');
+          if (nextP.health_goal && !prevP.health_goal) newlyExtracted.push('health_goal');
+          if (nextP.conditions && nextP.conditions.length > 0 && (!prevP.conditions || prevP.conditions.length === 0)) newlyExtracted.push('conditions');
+          if (nextP.feeling_note && !prevP.feeling_note) newlyExtracted.push('feeling_note');
+
+          const activeStepField = stepToField[step] || '';
+          if (newlyExtracted.length > 0 && !newlyExtracted.includes(activeStepField)) {
+            const list: string[] = [];
+            if (newlyExtracted.includes('age')) list.push(`age as **${nextP.age}**`);
+            if (newlyExtracted.includes('gender')) list.push(`gender as **${nextP.gender}**`);
+            if (newlyExtracted.includes('phone_number')) list.push(`phone number`);
+            if (newlyExtracted.includes('health_goal')) list.push(`health goals`);
+            if (newlyExtracted.includes('conditions')) list.push(`medical conditions`);
+            if (newlyExtracted.includes('feeling_note')) list.push(`feeling note`);
+            return `Got it, recorded your ${list.join(', ')}.\n\n`;
+          }
+          return '';
+        };
+
         const isQuery = isUserQueryOrQuestion(msgContent) || currentStepError === 'health_question';
 
         // Scenario 1: The user asked a health query or general question
@@ -721,8 +757,9 @@ Could you rephrase that? Try something like:
             matchedResponse = `${apiReply}\n\n---\n\n${nextStepQuestion}`;
           } else {
             const activeStep = onboardingStep === 'not_started' ? 'asked_name' : onboardingStep;
+            const acknowledgmentPrefix = getOutOrderAcknowledgment(nextProfile, get().onboardingProfile, activeStep);
             const activeQuestion = getOnboardingStepQuestion(activeStep, nextProfile, true);
-            matchedResponse = `${apiReply}\n\n---\n\n${activeQuestion}`;
+            matchedResponse = `${apiReply}\n\n---\n\n${acknowledgmentPrefix}${activeQuestion}`;
             nextBotMessageType = 'health_reply';
             if (onboardingStep === 'not_started') {
               nextStep = 'asked_name';
@@ -730,8 +767,8 @@ Could you rephrase that? Try something like:
             }
           }
         }
-        // Scenario 2: Validation error (no query, not a greeting, but has error)
-        else if (currentStepError && !isGreeting) {
+        // Scenario 2: Validation error (no query, not a greeting, but has error, and no new valid info was extracted)
+        else if (currentStepError && !isGreeting && !anyNewExtraction) {
           const activeStep = onboardingStep === 'not_started' ? 'asked_name' : onboardingStep;
           const activeQuestion = getOnboardingStepQuestion(activeStep, nextProfile, false, false, true);
           matchedResponse = `${currentStepError}\n\n${activeQuestion}`;
@@ -774,7 +811,9 @@ Could you rephrase that? Try something like:
           
           const hasJustNamed = !get().onboardingProfile.name && !!nextProfile.name;
           const nextStepQuestion = getOnboardingStepQuestion(nextStep, nextProfile, false, hasJustNamed);
-          matchedResponse = nextStepQuestion;
+          
+          const acknowledgmentPrefix = getOutOrderAcknowledgment(nextProfile, get().onboardingProfile, get().onboardingStep);
+          matchedResponse = `${acknowledgmentPrefix}${nextStepQuestion}`;
         }
         // Scenario 5: Fallback (no extraction, no greeting, not a query)
         else {

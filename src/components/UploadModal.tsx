@@ -18,6 +18,8 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess, uploadTy
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isCompleted, setIsCompleted] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [passwordRequired, setPasswordRequired] = useState(false);
+  const [password, setPassword] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const resetState = () => {
@@ -26,6 +28,8 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess, uploadTy
     setUploadProgress(0);
     setIsCompleted(false);
     setErrorMessage(null);
+    setPasswordRequired(false);
+    setPassword('');
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -34,6 +38,8 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess, uploadTy
       setSelectedFile(file);
       setIsCompleted(false);
       setErrorMessage(null);
+      setPasswordRequired(false);
+      setPassword('');
     }
   };
 
@@ -48,6 +54,8 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess, uploadTy
       setSelectedFile(file);
       setIsCompleted(false);
       setErrorMessage(null);
+      setPasswordRequired(false);
+      setPassword('');
     }
   };
 
@@ -71,6 +79,9 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess, uploadTy
     try {
       const formData = new FormData();
       formData.append('file', selectedFile);
+      if (password) {
+        formData.append('password', password);
+      }
 
       try {
         const store = useChatStore.getState();
@@ -97,6 +108,18 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess, uploadTy
 
       const data = await response.json();
       
+      if (data.is_password_protected === true) {
+        setIsUploading(false);
+        setUploadProgress(0);
+        setPasswordRequired(true);
+        if (password) {
+          setErrorMessage('Incorrect password. Please try again.');
+        } else {
+          setErrorMessage(data.message || 'This file is password-protected. Please enter the password.');
+        }
+        return;
+      }
+
       if (data.is_medical_document === true) {
         setUploadProgress(100);
         setIsCompleted(true);
@@ -209,6 +232,26 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess, uploadTy
               )}
             </div>
 
+            {/* Password Input (only if passwordRequired) */}
+            {passwordRequired && (
+              <div className="mt-4 p-3 rounded-2xl bg-amber-500/10 dark:bg-amber-950/20 border border-amber-500/20 flex flex-col gap-2 animate-fade-in">
+                <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider">Document Password</span>
+                <input
+                  type="password"
+                  placeholder="Enter PDF password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleUploadSubmit();
+                    }
+                  }}
+                  className="w-full h-10 px-3.5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-xs font-medium focus:outline-none focus:border-amber-500 dark:focus:border-amber-400 focus:ring-1 focus:ring-amber-500 transition text-black dark:text-white"
+                />
+              </div>
+            )}
+
             {/* Technical Specifications */}
             <div className="mt-4 bg-neutral-50 dark:bg-neutral-950/40 border border-neutral-100 dark:border-neutral-900 rounded-2xl p-3.5 flex flex-col gap-2.5">
               <h4 className="text-[10px] font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">File Specifications</h4>
@@ -254,10 +297,14 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess, uploadTy
               </button>
               <button
                 onClick={handleUploadSubmit}
-                disabled={!selectedFile || isUploading || isCompleted}
+                disabled={!selectedFile || isUploading || isCompleted || (passwordRequired && !password.trim())}
                 className="flex-1 h-10 rounded-full bg-black dark:bg-white text-white dark:text-black font-bold text-xs hover:scale-[1.02] active:scale-[0.98] transition flex items-center justify-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                {uploadType === 'prescription' ? 'Analyze Prescription' : 'Analyze Report'}
+                {passwordRequired
+                  ? 'Decrypt & Analyze'
+                  : uploadType === 'prescription'
+                  ? 'Analyze Prescription'
+                  : 'Analyze Report'}
               </button>
             </div>
           </div>
