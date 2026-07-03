@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Calendar as CalendarIcon, Clock, Phone, User, X, CheckCircle, AlertCircle, Loader2, ChevronLeft, ChevronRight, Check } from 'lucide-react';
 import { useChatStore } from '@/store/chatStore';
 import { captureAnalyticsEvent } from '@/utils/analytics';
+import { toValidUUID } from '@/store/utils';
 
 interface ScheduleCallModalProps {
   isOpen: boolean;
@@ -20,7 +21,7 @@ const TIME_SLOTS = [
 const WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 
 export default function ScheduleCallModal({ isOpen, onClose }: ScheduleCallModalProps) {
-  const { onboardingProfile, userName } = useChatStore();
+  const { onboardingProfile, userName, sessionId, activeChatId } = useChatStore();
 
   // Form states
   const [formName, setFormName] = useState('');
@@ -211,6 +212,35 @@ export default function ScheduleCallModal({ isOpen, onClose }: ScheduleCallModal
     setIsSubmitting(true);
     captureAnalyticsEvent('schedule_call_attempt', { date: selectedDate, time: selectedTime });
 
+    const rawSessionId = sessionId || activeChatId || (typeof window !== 'undefined' ? localStorage.getItem('yhealth_active_chat_id') : null) || '';
+
+    // If name or mobile wasn't prefilled/submitted yet, pre-register the lead first so the backend has it
+    if (!isNameDisabled || !isPhoneDisabled) {
+      try {
+        await fetch('/api/leads', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'accept': 'application/json',
+          },
+          body: JSON.stringify({
+            session_id: toValidUUID(rawSessionId),
+            name: formName.trim() || 'Guest User',
+            phone_number: normalizedPhone,
+            consent: true,
+            lead_status: 'New',
+            health_goal: onboardingProfile?.health_goal || 'General wellness',
+            additional_details: {
+              conditions: onboardingProfile?.conditions || [],
+              feeling_note: onboardingProfile?.feeling_note || '',
+            },
+          }),
+        });
+      } catch (err) {
+        console.warn('Failed to pre-register lead before scheduling:', err);
+      }
+    }
+
     try {
       const response = await fetch('/api/schedule', {
         method: 'POST',
@@ -219,10 +249,9 @@ export default function ScheduleCallModal({ isOpen, onClose }: ScheduleCallModal
           'Accept': 'application/json',
         },
         body: JSON.stringify({
-          name: formName.trim() || 'Guest User',
-          mobile_number: normalizedPhone,
-          schedule_date: selectedDate,
-          schedule_time: selectedTime,
+          sessionId: rawSessionId,
+          date: selectedDate,
+          time: selectedTime,
         }),
       });
 

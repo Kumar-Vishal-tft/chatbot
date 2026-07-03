@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { toValidUUID } from '@/store/utils';
 
 export async function POST(request: NextRequest) {
   const baseUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
-  const backendUrl = `${baseUrl.replace(/\/$/, '')}/schedule`;
 
   try {
-    const body = await request.json();
-    console.log('Forwarding schedule request data to backend:', backendUrl, body);
+    const { sessionId, date, time } = await request.json();
+
+    if (!sessionId) {
+      return NextResponse.json({ error: 'sessionId is required' }, { status: 400 });
+    }
+
+    const validUUID = toValidUUID(sessionId);
+    const backendUrl = `${baseUrl.replace(/\/$/, '')}/leads/${validUUID}/schedule`;
+
+    console.log('Forwarding schedule request data to backend:', backendUrl, { date, time });
 
     const response = await fetch(backendUrl, {
       method: 'POST',
@@ -14,7 +22,7 @@ export async function POST(request: NextRequest) {
         'Content-Type': 'application/json',
         'accept': 'application/json',
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ date, time }),
     });
 
     const text = await response.text();
@@ -37,3 +45,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
