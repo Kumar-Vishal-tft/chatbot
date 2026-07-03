@@ -6,6 +6,7 @@ export interface Message {
   content: string;
   timestamp: string;
   created_at?: number;
+  isAbusive?: boolean;
 }
 
 export interface ChatSession {

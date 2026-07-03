@@ -512,7 +512,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
             created_at: Date.now(),
           };
           set((state) => {
-            const nextMessages = { ...state.messages, [targetChatId]: [...(state.messages[targetChatId] || []), assistantMessage] };
+            const currentMsgs = state.messages[targetChatId] || [];
+            const updatedMsgs = currentMsgs.map((m, idx) => 
+              (m.sender === 'user' && idx === currentMsgs.length - 1) ? { ...m, isAbusive: true } : m
+            );
+            const nextMessages = { ...state.messages, [targetChatId]: [...updatedMsgs, { ...assistantMessage, isAbusive: true }] };
             saveChatState(state.chatSessions, nextMessages, targetChatId);
             return { isTyping: false, streamingMessageId: assistantMessageId, messages: nextMessages, lastBotMessageType: nextBotMessageType };
           });
@@ -523,6 +527,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 clearInterval(interval);
                 set({ streamingMessageId: null, activeIntervalId: null });
                 saveChatState(get().chatSessions, get().messages, get().activeChatId);
+                if (!get().isVerified && get().onboardingStep !== 'completed') {
+                  syncSessionWithRedis(get().chatSessions, get().messages, targetChatId);
+                } else {
+                  triggerDebouncedSync(get().chatSessions, get().messages, targetChatId);
+                }
                 resolveStream();
               } else {
                 currentIdx += Math.min(Math.floor(Math.random() * 4) + 6, matchedResponse.length - currentIdx);
@@ -557,7 +566,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
             created_at: Date.now(),
           };
           set((state) => {
-            const nextMessages = { ...state.messages, [targetChatId]: [...(state.messages[targetChatId] || []), assistantMessage] };
+            const currentMsgs = state.messages[targetChatId] || [];
+            const updatedMsgs = currentMsgs.map((m, idx) => 
+              (m.sender === 'user' && idx === currentMsgs.length - 1) ? { ...m, isAbusive: true } : m
+            );
+            const nextMessages = { ...state.messages, [targetChatId]: [...updatedMsgs, { ...assistantMessage, isAbusive: true }] };
             saveChatState(state.chatSessions, nextMessages, targetChatId);
             return { isTyping: false, streamingMessageId: assistantMessageId, messages: nextMessages, lastBotMessageType: nextBotMessageType };
           });
@@ -568,6 +581,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 clearInterval(interval);
                 set({ streamingMessageId: null, activeIntervalId: null });
                 saveChatState(get().chatSessions, get().messages, get().activeChatId);
+                if (!get().isVerified && get().onboardingStep !== 'completed') {
+                  syncSessionWithRedis(get().chatSessions, get().messages, targetChatId);
+                } else {
+                  triggerDebouncedSync(get().chatSessions, get().messages, targetChatId);
+                }
                 resolveStream();
               } else {
                 currentIdx += Math.min(Math.floor(Math.random() * 4) + 6, matchedResponse.length - currentIdx);
@@ -602,7 +620,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
             created_at: Date.now(),
           };
           set((state) => {
-            const nextMessages = { ...state.messages, [targetChatId]: [...(state.messages[targetChatId] || []), assistantMessage] };
+            const currentMsgs = state.messages[targetChatId] || [];
+            const updatedMsgs = currentMsgs.map((m, idx) => 
+              (m.sender === 'user' && idx === currentMsgs.length - 1) ? { ...m, isAbusive: true } : m
+            );
+            const nextMessages = { ...state.messages, [targetChatId]: [...updatedMsgs, { ...assistantMessage, isAbusive: true }] };
             saveChatState(state.chatSessions, nextMessages, targetChatId);
             return { isTyping: false, streamingMessageId: assistantMessageId, messages: nextMessages, lastBotMessageType: nextBotMessageType };
           });
@@ -613,6 +635,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 clearInterval(interval);
                 set({ streamingMessageId: null, activeIntervalId: null });
                 saveChatState(get().chatSessions, get().messages, get().activeChatId);
+                if (!get().isVerified && get().onboardingStep !== 'completed') {
+                  syncSessionWithRedis(get().chatSessions, get().messages, targetChatId);
+                } else {
+                  triggerDebouncedSync(get().chatSessions, get().messages, targetChatId);
+                }
                 resolveStream();
               } else {
                 currentIdx += Math.min(Math.floor(Math.random() * 4) + 6, matchedResponse.length - currentIdx);
@@ -875,7 +902,7 @@ Could you rephrase that? Try something like:
                 const activeId = get().activeChatId;
 
                 if (sessionUUID && activeId) {
-                  const msgs = get().messages[activeId] || [];
+                  const msgs = (get().messages[activeId] || []).filter((m) => !m.isAbusive);
                   const chatPairs: { user: string; agent: string }[] = [];
 
                   for (let i = 0; i < msgs.length; i++) {

@@ -276,7 +276,7 @@ export const syncConversationWithBackend = async (
     if (!m.created_at || m.created_at < fifteenMinutesAgo) {
       return false;
     }
-    return !enqueuedIds.has(m.id);
+    return !enqueuedIds.has(m.id) && !m.isAbusive;
   });
   
   // Do not enqueue streaming/typing assistant response until it finishes

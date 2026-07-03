@@ -186,6 +186,32 @@ Your primary focus is Metabolic Health and Preventive Wellness.
   }
 }
 
+export function isAbusiveOrWarningMessage(msg: Message): boolean {
+  if (msg.isAbusive) return true;
+
+  const content = msg.content || '';
+  const lowerContent = content.toLowerCase();
+
+  // If user, check for profanity
+  if (msg.sender === 'user') {
+    return hasProfanity(lowerContent);
+  }
+
+  // If assistant, check if it's a warning or lock notice
+  if (msg.sender === 'assistant') {
+    return (
+      lowerContent.includes('unable to continue this conversation if it involves offensive language') ||
+      lowerContent.includes('unable to continue this conversation if you send the same message repeatedly') ||
+      lowerContent.includes('please avoid sending the same message repeatedly') ||
+      lowerContent.includes('offensive language was detected') ||
+      lowerContent.includes('lock your message field') ||
+      lowerContent.includes('message field has been locked')
+    );
+  }
+
+  return false;
+}
+
 // ── Gemini Chat Response ───────────────────────────────────────────────────
 
 export async function fetchGeminiResponse(
@@ -280,7 +306,10 @@ ${profile
 
 Remember: Be warm, clear, and genuinely helpful. Always recommend seeing a doctor for diagnosis, but do so naturally — never in a defensive or robotic way. NEVER use any emojis in your output.${questionOverride}`;
 
-  const mappedHistory = history.map((msg) => ({
+  console.log("fetchGeminiResponse history before filter:", JSON.stringify(history, null, 2));
+  const cleanHistory = history.filter((msg) => !isAbusiveOrWarningMessage(msg));
+  console.log("fetchGeminiResponse cleanHistory:", JSON.stringify(cleanHistory, null, 2));
+  const mappedHistory = cleanHistory.map((msg) => ({
     role: msg.sender === 'user' ? 'user' : 'model',
     parts: [{ text: msg.content }],
   }));
@@ -524,7 +553,8 @@ Strict rules:
 12. Pay close attention to the conversation history. Always remember the context, previous questions, and answers from the last 5 turns of conversation to maintain smooth, context-aware continuity.`;
 
   // Build history context for Gemini (so it sees the conversation)
-  const mappedHistory = history.map((msg) => ({
+  const cleanHistory = history.filter((msg) => !isAbusiveOrWarningMessage(msg));
+  const mappedHistory = cleanHistory.map((msg) => ({
     role: msg.sender === 'user' ? 'user' : 'model',
     parts: [{ text: msg.content }],
   }));

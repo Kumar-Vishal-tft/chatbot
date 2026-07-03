@@ -93,6 +93,13 @@ src/app/
     │   │                           #         Transparently forwards backend HTTP status.
     │   └── sync-messages/route.ts  # POST — Batch syncs messages from Redis → backend
     │
+    ├── classify/
+    │   └── route.ts                # POST — Classifies uploaded medical documents (reports, prescriptions).
+    │                               #          Checks upload quotas via Redis for non-program sessions.
+    │                               #          Decrypts password-protected PDFs using pdftocairo.
+    │                               #          Uses Gemini with model fallback to extract patient profiles
+    │                               #          and generate a clinical analysis summary.
+    │
     ├── extract/route.ts            # POST — LLM-powered entity extraction for onboarding
     │                               #   (name, age, gender, phone, goal, conditions,
     │                               #   feeling_note) from free-text user input.
@@ -104,6 +111,10 @@ src/app/
     │
     ├── predefined-persona/route.ts # GET  — Fetches campaign-specific system prompts
     │                               #   from backend by utm_campaign name.
+    │
+    ├── schedule/
+    │   └── route.ts                # POST — Proxies patient call-scheduling data to the
+    │                               #          FastAPI backend schedule endpoint.
     │
     ├── session/
     │   ├── load/route.ts           # GET  — Loads full session state from Redis by sessionId
@@ -145,6 +156,9 @@ src/components/
 ├── LeadCaptureCard.tsx     # Onboarding completion confirmation card
 │                           #   Shown when a new user finishes the 7-step flow.
 │
+├── LimitModal.tsx          # Warning modal when users reach their free file upload limit
+│                           #   (report or prescription). Prompts to subscribe or schedule a call.
+│
 ├── Navbar.tsx              # Top navigation bar
 │                           #   App logo, session controls, theme toggle button,
 │                           #   new chat button, mobile menu.
@@ -152,6 +166,9 @@ src/components/
 ├── PromptCards.tsx         # Campaign-specific suggested prompt pill cards
 │                           #   Displayed on the welcome screen before chat starts.
 │                           #   Content driven by CAMPAIGN_CONFIG in store/.
+│
+├── ScheduleCallModal.tsx   # Interactive booking modal for scheduling calls with YHealth experts
+│                           #   Includes inline calendar date picker and time slot selection.
 │
 ├── Sidebar.tsx             # Chat history sidebar
 │                           #   Lists all chat sessions, allows switching/deleting.
