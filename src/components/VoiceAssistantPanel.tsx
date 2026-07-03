@@ -455,8 +455,6 @@ CRITICAL RULES FOR RESPONSES:
           },
 
           onmessage: async (msg: any) => {
-            // Reset inactivity timer on any socket communication
-            lastActivityTimeRef.current = Date.now();
 
             // Handle tool calls from the model
             if (msg.toolCall?.functionCalls) {
@@ -659,6 +657,7 @@ CRITICAL RULES FOR RESPONSES:
             // 1. Play returned model voice audio
             const audio = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             if (audio) {
+              lastActivityTimeRef.current = Date.now();
               setState('speaking');
               scheduleAudioChunk(audio);
             }
@@ -676,6 +675,7 @@ CRITICAL RULES FOR RESPONSES:
               msg.serverContent?.inputTranscription?.parts?.[0]?.text ||
               msg.inputAudioTranscription?.parts?.[0]?.text;
             if (userSpeech) {
+              lastActivityTimeRef.current = Date.now();
               console.log("[Voice Assistant] User speech chunk:", userSpeech);
               setTranscript(userSpeech);
               userSpeechAccumulatedRef.current += (userSpeech + " ");
@@ -687,6 +687,7 @@ CRITICAL RULES FOR RESPONSES:
               msg.serverContent?.modelTurn?.parts?.[0]?.text ||
               msg.serverContent?.modelTurn?.parts?.find((p: any) => p.text)?.text;
             if (aiSpeech) {
+              lastActivityTimeRef.current = Date.now();
               console.log("[Voice Assistant] AI speech chunk:", aiSpeech);
               setTranscript(aiSpeech);
               aiSpeechAccumulatedRef.current += (aiSpeech + " ");
