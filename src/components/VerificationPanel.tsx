@@ -54,6 +54,10 @@ function getFriendlyErrorMessage(msg: string, defaultMsg: string) {
   if (!msg) return defaultMsg;
   const lowercase = msg.toLowerCase();
   
+  if (lowercase.includes('user not found') || lowercase.includes('not found') || lowercase.includes('no account')) {
+    return defaultMsg;
+  }
+  
   if (
     lowercase.includes('json') ||
     lowercase.includes('fetch') ||
@@ -165,15 +169,7 @@ export default function VerificationPanel({ onVerified, onClose }: VerificationP
         setStep('otp');
       })
       .catch(err => {
-        if (err.status) {
-          // Real backend validation error (e.g. 400/404)
-          setPhoneError(err.message || "We couldn't find a health profile linked to this mobile number.");
-        } else {
-          // Connection refused / server completely offline
-          console.warn('Failed to send OTP to backend. Proceeding to OTP step for offline/fallback mode.', err);
-          captureAnalyticsEvent('otp_sent');
-          setStep('otp');
-        }
+        setPhoneError(err.message || "We couldn't find a health profile linked to this mobile number.");
       })
       .finally(() => {
         setIsSendingOtp(false);
