@@ -1,12 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { redis } from '@/lib/redis';
 
 export async function POST(request: NextRequest) {
   const baseUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
   const backendUrl = `${baseUrl.replace(/\/$/, '')}/auth/send-otp`;
 
-  
   try {
     const body = await request.json();
+    const phone = body.phone_number ? body.phone_number.toString().trim() : '';
+
+    if (phone) {
+      const lockoutKey = `otp_lockout:${phone}`;
+      const isLocked = await redis.get(lockoutKey);
+      if (isLocked) {
+        return NextResponse.json(
+          { detail: 'Too many attempts, please try again later' },
+          { status: 429 }
+        );
+      }
+    }
+
     const response = await fetch(backendUrl, {
       method: 'POST',
       headers: {
@@ -35,3 +48,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+

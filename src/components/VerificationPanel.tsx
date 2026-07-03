@@ -135,7 +135,7 @@ export default function VerificationPanel({ onVerified, onClose }: VerificationP
     setPhoneError('');
     setIsSendingOtp(true);
 
-    fetch(`${BACKEND_URL}/auth/send-otp?t=${Date.now()}`, {
+    fetch(`/api/auth/send-otp?t=${Date.now()}`, {
       method: 'POST',
       headers: {
         'accept': 'application/json',
@@ -250,7 +250,7 @@ export default function VerificationPanel({ onVerified, onClose }: VerificationP
 
     let fetchedPersona: any = null;
 
-    fetch(`${BACKEND_URL}/auth/verify-otp`, {
+    fetch(`/api/auth/verify-otp`, {
       method: 'POST',
       headers: {
         'accept': 'application/json',
@@ -317,7 +317,7 @@ export default function VerificationPanel({ onVerified, onClose }: VerificationP
     setOtp(Array(OTP_LENGTH).fill(''));
     setOtpError('');
 
-    fetch(`${BACKEND_URL}/auth/send-otp?t=${Date.now()}`, {
+    fetch(`/api/auth/send-otp?t=${Date.now()}`, {
       method: 'POST',
       headers: {
         'accept': 'application/json',
