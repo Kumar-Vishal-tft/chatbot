@@ -59,6 +59,7 @@ export default function VoiceAssistantPanel({
   const micStreamRef = useRef<MediaStream | null>(null);
   const sessionRef = useRef<any>(null);
   const scheduledEndRef = useRef(0);
+  const isTearingDownRef = useRef(false);
 
   // Voice transcription accumulation refs for Langfuse tracing
   const userSpeechAccumulatedRef = useRef<string>("");
@@ -140,6 +141,7 @@ export default function VoiceAssistantPanel({
   }, []);
 
   const teardown = useCallback((preserveError = false) => {
+    isTearingDownRef.current = true;
     clearAudio();
     if (micStreamRef.current) {
       micStreamRef.current.getTracks().forEach(t => t.stop());
@@ -219,6 +221,7 @@ export default function VoiceAssistantPanel({
   };
 
   const startConnection = useCallback(async () => {
+    isTearingDownRef.current = false;
     setState('connecting');
     setConnectionError(null);
     userSpeechAccumulatedRef.current = "";
@@ -808,13 +811,22 @@ CRITICAL RULES FOR RESPONSES:
 
           onerror: (err: any) => {
             console.error('Live API error:', err);
-            setState('error');
-            setConnectionError('Connection lost. Please try again.');
-            teardown(true);
+            if (!isTearingDownRef.current) {
+              setState('error');
+              setConnectionError('Connection lost. Please try again.');
+              teardown(true);
+            }
           },
 
           onclose: () => {
-            teardown(false);
+            if (!isTearingDownRef.current) {
+              console.warn("WebSocket closed unexpectedly by remote host.");
+              setState('error');
+              setConnectionError("Didn't catch that, try again");
+              teardown(true);
+            } else {
+              teardown(false);
+            }
           }
         }
       });
@@ -1093,6 +1105,8 @@ CRITICAL RULES FOR RESPONSES:
     return () => clearInterval(interval);
   }, [isOpen, state, handleCloseSession]);
 
+  const isMicError = connectionError?.toLowerCase().includes('mic') || connectionError?.toLowerCase().includes('permission');
+
   if (!isOpen) return null;
 
   return (
@@ -1150,47 +1164,73 @@ CRITICAL RULES FOR RESPONSES:
 
             {/* Body */}
             {state === 'error' ? (
-              /* Premium Permission Denied & Error recovery block */
-              <div className="flex-1 flex flex-col items-center justify-center py-6 px-4 text-center">
-                <div className="w-16 h-16 rounded-full bg-red-50 dark:bg-red-950/20 flex items-center justify-center text-red-500 dark:text-red-400 mb-4 animate-pulse">
-                  <MicOff className="w-8 h-8" />
-                </div>
-                
-                <h3 className="text-base font-extrabold text-neutral-900 dark:text-white uppercase tracking-wider mb-2">
-                  Microphone Access Blocked
-                </h3>
-                
-                <p className="text-xs text-neutral-550 dark:text-neutral-400 leading-relaxed mb-6 max-w-[320px]">
-                  {connectionError || 'Microphone access denied. Voice input cannot be used until microphone permission is granted.'}
-                </p>
+              isMicError ? (
+                /* Premium Permission Denied & Error recovery block */
+                <div className="flex-1 flex flex-col items-center justify-center py-6 px-4 text-center">
+                  <div className="w-16 h-16 rounded-full bg-red-50 dark:bg-red-950/20 flex items-center justify-center text-red-500 dark:text-red-400 mb-4 animate-pulse">
+                    <MicOff className="w-8 h-8" />
+                  </div>
+                  
+                  <h3 className="text-base font-extrabold text-neutral-900 dark:text-white uppercase tracking-wider mb-2">
+                    Microphone Access Blocked
+                  </h3>
+                  
+                  <p className="text-xs text-neutral-550 dark:text-neutral-400 leading-relaxed mb-6 max-w-[320px]">
+                    {connectionError || 'Microphone access denied. Voice input cannot be used until microphone permission is granted.'}
+                  </p>
 
-                {/* Browser-specific recovery guidance */}
-                <div className="w-full max-w-[340px] bg-neutral-50/50 dark:bg-white/[0.02] border border-black/[0.05] dark:border-white/[0.08] rounded-2xl p-4 text-left mb-6">
-                  <span className="block text-[10px] font-extrabold tracking-wider text-neutral-400 dark:text-neutral-500 uppercase mb-2">
-                    How to restore access:
-                  </span>
-                  <ol className="text-[11px] text-neutral-600 dark:text-neutral-400 space-y-2 list-decimal pl-4">
-                    <li>
-                      <span>Click the lock icon (🔒) or settings controls next to the URL in your browser's address bar.</span>
-                    </li>
-                    <li>
-                      <span>Toggle <strong>Microphone</strong> permission to <strong>Allow</strong>.</span>
-                    </li>
-                    <li>
-                      <span>Click the <strong>Try Again</strong> button below to re-initialize your session.</span>
-                    </li>
-                  </ol>
-                </div>
+                  {/* Browser-specific recovery guidance */}
+                  <div className="w-full max-w-[340px] bg-neutral-50/50 dark:bg-white/[0.02] border border-black/[0.05] dark:border-white/[0.08] rounded-2xl p-4 text-left mb-6">
+                    <span className="block text-[10px] font-extrabold tracking-wider text-neutral-400 dark:text-neutral-500 uppercase mb-2">
+                      How to restore access:
+                    </span>
+                    <ol className="text-[11px] text-neutral-600 dark:text-neutral-400 space-y-2 list-decimal pl-4">
+                      <li>
+                        <span>Click the lock icon (🔒) or settings controls next to the URL in your browser's address bar.</span>
+                      </li>
+                      <li>
+                        <span>Toggle <strong>Microphone</strong> permission to <strong>Allow</strong>.</span>
+                      </li>
+                      <li>
+                        <span>Click the <strong>Try Again</strong> button below to re-initialize your session.</span>
+                      </li>
+                    </ol>
+                  </div>
 
-                <div className="flex gap-3">
-                  <button
-                    onClick={handleRetryPermission}
-                    className="px-6 py-2.5 rounded-full bg-black hover:bg-neutral-800 dark:bg-white dark:hover:bg-neutral-200 text-white dark:text-black text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer"
-                  >
-                    Try Again
-                  </button>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleRetryPermission}
+                      className="px-6 py-2.5 rounded-full bg-black hover:bg-neutral-800 dark:bg-white dark:hover:bg-neutral-200 text-white dark:text-black text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer"
+                    >
+                      Try Again
+                    </button>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                /* Connection / Silence Timeout friendly view */
+                <div className="flex-1 flex flex-col items-center justify-center py-6 px-4 text-center animate-fade-in">
+                  <div className="w-16 h-16 rounded-full bg-amber-50 dark:bg-amber-950/20 flex items-center justify-center text-amber-500 dark:text-amber-400 mb-4">
+                    <AlertTriangle className="w-8 h-8" />
+                  </div>
+                  
+                  <h3 className="text-base font-extrabold text-neutral-900 dark:text-white uppercase tracking-wider mb-2">
+                    {connectionError?.includes("catch") ? "Didn't catch that" : "Connection Dropped"}
+                  </h3>
+                  
+                  <p className="text-xs text-neutral-550 dark:text-neutral-400 leading-relaxed mb-6 max-w-[280px]">
+                    {connectionError || "Something went wrong. Let's try connecting again."}
+                  </p>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={startConnection}
+                      className="px-6 py-2.5 rounded-full bg-black hover:bg-neutral-800 dark:bg-white dark:hover:bg-neutral-200 text-white dark:text-black text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer"
+                    >
+                      Try Again
+                    </button>
+                  </div>
+                </div>
+              )
             ) : (
               /* Center large mic button with volumetric dynamic pulse */
               <div className="flex-1 flex flex-col items-center justify-center py-6 relative">
