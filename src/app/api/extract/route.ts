@@ -63,7 +63,8 @@ export async function POST(request: NextRequest) {
 Analyze the user's input and extract any of the following clinical profiling attributes. Validate each extracted attribute strictly according to the rules:
 
 1. name (name):
-   - Rules: Real human name. Minimum 2 characters. No numbers/symbols. Reject single letters.
+   - Rules: Real human name (proper noun). Minimum 2 characters. No numbers/symbols. Reject single letters.
+   - CRITICAL: Never extract common verbs (e.g., 'having', 'celebrating', 'eat', 'feeling'), adjectives (e.g., 'overweight', 'worried', 'sad', 'well', 'sick', 'dark'), adverbs/prepositions (e.g., 'not'), pronouns, or food/objects (e.g., 'rajma', 'svelte') as a name. Only extract if the user is explicitly introducing themselves (e.g., "I am Kumar", "My name is Priya"). If the input is not a clear proper noun human name, set "valid" to false and "value" to null.
    - Output schema: { "valid": boolean, "value": string | null, "reason": string }
 
 2. age (age):
@@ -106,13 +107,16 @@ Output JSON must follow this schema exactly:
   }
 }
 CRITICAL: If an entity is NOT mentioned in the text, you MUST set its "valid" to false, "value" to null, and "reason" to "" (empty string). Do NOT output validation messages for missing or unmentioned fields.
-CRITICAL: If the user's input is a health-related question, health-related statement (e.g., about their diet, sleep, symptoms, habits like eating at midnight, or medical concerns), or general health inquiry instead of answering the current onboarding prompt (indicated by Context Hint), you MUST set the "reason" of the active attribute (e.g. name, gender, age) to "health_question" (and set its "valid" to false and "value" to null).
+CRITICAL: If the user's input is a health-related question, health-related statement (e.g., about their diet, sleep, symptoms, habits like eating at midnight, or medical concerns, or statements like "I am not feeling well", "I feel sick", "can I eat rajma?"), or general health inquiry instead of answering the current onboarding prompt (indicated by Context Hint), you MUST set the "reason" of the active attribute (e.g. name, gender, age) to "health_question" (and set its "valid" to false and "value" to null).
 Your output must be a clean JSON object. Do not include markdown formatting or preamble.`;
 
     let contextHint = '';
     if (currentStep) {
       const stepName = currentStep.toLowerCase().replace('asked_', '');
       contextHint = `\nContext Hint: The user is currently answering the prompt for the field "${stepName}". If the user's input is a simple/short response (e.g. just a number like "99", "male", "diabetes", or "none"), you MUST treat it as the value for the "${stepName}" attribute.`;
+      if (stepName !== 'name' && stepName !== 'not_started') {
+        contextHint += `\nCRITICAL: The user is NOT answering a prompt about their name (they are answering "${stepName}"). You MUST NOT extract a name from this input, and should set the name field in the output to {"valid": false, "value": null, "reason": ""}, unless they explicitly introduce themselves (e.g. "my name is Kumar").`;
+      }
     }
     const fullSystemInstruction = `${systemInstruction}${contextHint}`;
 
@@ -125,7 +129,7 @@ Your output must be a clean JSON object. Do not include markdown formatting or p
     while (attempts < maxAttempts) {
       try {
         attempts++;
-        const model = attempts === 1 ? 'gemini-2.5-flash-lite' : 'gemini-2.5-flash';
+        const model = 'gemini-2.5-flash';
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
         response = await fetch(url, {
           method: 'POST',

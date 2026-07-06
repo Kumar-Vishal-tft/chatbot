@@ -4,14 +4,17 @@ import { redis } from '@/lib/redis';
 export const dynamic = 'force-dynamic';
 
 const BAD_WORDS = [
-  'fuck', 'shit', 'bitch', 'asshole', 'crap', 'dick', 'pussy', 'bastard',
-  'idiot', 'dumb', 'stupid', 'whore', 'slut', 'cunt', 'fag', 'nigger',
-  'retard', 'wanker', 'motherfucker', 'cocksucker',
+  'fuck', 'shit', 'bitch', 'asshole', 'dick', 'pussy', 'bastard',
+  'whore', 'slut', 'cunt', 'fag', 'nigger', 'retard', 'wanker',
+  'motherfucker', 'cocksucker',
 ];
 
 function hasAbusiveContent(text: string): boolean {
   const lower = text.toLowerCase();
-  return BAD_WORDS.some((word) => lower.includes(word));
+  return BAD_WORDS.some((word) => {
+    const regex = new RegExp(`\\b${word}\\b`, 'i');
+    return regex.test(lower);
+  });
 }
 
 export async function GET(request: NextRequest) {

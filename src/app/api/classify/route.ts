@@ -198,7 +198,7 @@ Output must be a clean JSON object following this schema:
 Do not include markdown code blocks or any conversational text. Output only raw JSON.`;
 
         // Attempt extraction with model fallback
-        const modelsToTry = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'];
+        const modelsToTry = ['gemini-2.5-flash'];
         let geminiRes = null;
         let successfulModel = '';
 

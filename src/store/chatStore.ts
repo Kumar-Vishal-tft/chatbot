@@ -49,9 +49,9 @@ function isUserQueryOrQuestion(content: string): boolean {
     if (allPartsShort) return false;
   }
   
-  // If it's a sentence (> 3 words) and contains clinical/health/lifestyle/symptom/habit keywords, classify it as a query
-  const hasHealthKeywords = /\b(pain|hurt|ache|fever|cough|breath|dizzy|blood|glucose|pressure|heart|sugar|diet|nutrition|weight|fitness|exercise|sleep|stress|anxiety|depression|medication|dose|side\s*effect|pill|doctor|clinic|hospital|eat|eating|food|dinner|lunch|breakfast|meal|meals|midnight|night|morning|routine|habit|habits|drink|drinking|water|alcohol|smoke|smoking|workout|gym|run|running|walk|walking|hba1c|a1c|hb|bp|cholesterol|thyroid|creatinine|insulin|report|reports|diagnostic|test|tests|scan|scans|lab|labs|diabetic|asthmatic|obese|symptom|symptoms|disease|illness|medical|health|wellness|clinical|physician|gp|cgm|sensor|reading|readings|mg\/dl|mmhg|bpm|fatty\s*liver|kidney|uric\s*acid)\b/i.test(trimmed);
-  const isSentence = words.length > 3;
+  // If it's a sentence (>= 3 words) and contains clinical/health/lifestyle/symptom/habit keywords, classify it as a query
+  const hasHealthKeywords = /\b(pain|hurt|ache|fever|cough|breath|dizzy|blood|glucose|pressure|heart|sugar|diet|nutrition|weight|fitness|exercise|sleep|stress|anxiety|depression|medication|dose|side\s*effect|pill|doctor|clinic|hospital|eat|eating|food|dinner|lunch|breakfast|meal|meals|midnight|night|morning|routine|habit|habits|drink|drinking|water|alcohol|smoke|smoking|workout|gym|run|running|walk|walking|hba1c|a1c|hb|bp|cholesterol|thyroid|creatinine|insulin|report|reports|diagnostic|test|tests|scan|scans|lab|labs|diabetic|asthmatic|obese|symptom|symptoms|disease|illness|medical|health|wellness|clinical|physician|gp|cgm|sensor|reading|readings|mg\/dl|mmhg|bpm|fatty\s*liver|kidney|uric\s*acid|feel|feeling|well|sick|ill|unwell|tired|exhausted|fatigue|nausea|vomit|headache|migraine|overweight|obese|obesity|underweight)\b/i.test(trimmed);
+  const isSentence = words.length >= 3;
   
   return isSentence && hasHealthKeywords;
 }
@@ -772,7 +772,7 @@ Could you rephrase that? Try something like:
         // Scenario 1: The user asked a health query or general question
         if (isQuery) {
           const onboardingHistory = get().messages[targetChatId] || [];
-          const apiReply = await fetchGeminiResponse(msgContent, onboardingHistory.slice(-11, -1), nextProfile, get().isExistingPatient, get().activeChatId || undefined);
+          const apiReply = await fetchGeminiResponse(msgContent, onboardingHistory.slice(-11, -1), nextProfile, get().isExistingPatient, get().activeChatId || undefined, get().onboardingStep);
           
           if (anyNewExtraction && !currentStepError) {
             const resolvedNextStep = getNextOnboardingStep(nextProfile);
@@ -971,7 +971,7 @@ Could you rephrase that? Try something like:
       // ── 5. Active chat (onboarding complete OR verified) ─────────────────
       else {
         const history = get().messages[targetChatId] || [];
-        matchedResponse = await fetchGeminiResponse(msgContent, history.slice(-11, -1), get().onboardingProfile, get().isExistingPatient, get().activeChatId || undefined); // keep last 5 turns (10 messages) of context
+        matchedResponse = await fetchGeminiResponse(msgContent, history.slice(-11, -1), get().onboardingProfile, get().isExistingPatient, get().activeChatId || undefined, get().onboardingStep); // keep last 5 turns (10 messages) of context
         nextBotMessageType = 'health_reply';
       }
 

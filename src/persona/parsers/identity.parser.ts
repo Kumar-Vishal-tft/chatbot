@@ -16,8 +16,8 @@ export function parseIdentity(data: any): ParsedSection {
   const phone = identity?.phone ? safeGet(identity.phone) : "Not Shared";
   const timezone = safeGet(identity?.timezone, "Asia/Kolkata");
 
-  const weight = safeGet(anthropometry?.weight_kg, null);
-  const height = safeGet(anthropometry?.height_cm, null);
+  const weight = safeGet(anthropometry?.weight_kg, safeGet(identity?.weight_kg, null));
+  const height = safeGet(anthropometry?.height_cm, safeGet(identity?.height_cm, null));
   const bmi = safeGet(anthropometry?.bmi, null);
   const bmiCat = safeGet(anthropometry?.bmi_category, "Unknown");
   const bmr = safeGet(anthropometry?.bmr_kcal, null);

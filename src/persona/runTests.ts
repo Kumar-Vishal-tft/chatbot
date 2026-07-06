@@ -1,6 +1,7 @@
 import { activePersonaManager, PersonaSectionName } from './PersonaManager';
 import { PATIENT_PERSONA_MOCK } from './patientMock';
 import { safeGet } from './safeGet';
+import { PersonaContextBuilder } from './PersonaContextBuilder';
 
 // Color logging helpers
 const colors = {
@@ -72,12 +73,12 @@ async function runAllTests() {
     },
     {
       section: 'lab_results_profile',
-      expectedKeywords: ["Total Cholesterol: 338.86", "LDL: 225.55", "TSH: 371.2", "HbA1c: 5.7%"],
+      expectedKeywords: ["Total Cholesterol: 338.86", "LDL: 225.55", "TSH: 371.2", "HbA1c: 5.7%", "Estimated Average Glucose (eAG): 117 mg/dL"],
       expectedRisks: ["TSH is critically elevated", "LDL (\"bad\") Cholesterol is significantly high", "HbA1c is 5.7%", "Vitamin D"]
     },
     {
       section: 'medications_profile',
-      expectedKeywords: ["Gluxit Trio 500/5mg", "Adherence Rate"],
+      expectedKeywords: ["Gluxit Trio 500/5mg", "Adherence Rate", "Added/Prescribed By: Patient added / self-reported", "Start Date: August 2025"],
       expectedRisks: ["Medication adherence is extremely low"]
     },
     {
@@ -92,7 +93,7 @@ async function runAllTests() {
     },
     {
       section: 'nutrition_profile',
-      expectedKeywords: ["Besan Chilla", "Protein: 19.8g", "Carbs: 44.2g", "Glycemic Load: 22.1"],
+      expectedKeywords: ["Besan Chilla", "Protein: 19.8g", "Carbs: 44.2g", "Glycemic Load: 22.1", "Logged Meals (30 Days)", "1 meal", "Average Daily Calorie Intake", "Not enough data"],
       expectedRisks: ["high Glycemic Load"]
     },
     {
@@ -102,12 +103,12 @@ async function runAllTests() {
     },
     {
       section: 'face_scan_profile',
-      expectedKeywords: ["Pulse Rate: 95 bpm", "Stress Index: 294"],
+      expectedKeywords: ["Pulse Rate: 95 bpm", "Stress Index: 294", "Physiological Lab Estimates (Face Scan)", "Estimated HbA1c: 5.72%", "Estimated Average Glucose (eAG): 117 mg/dL"],
       expectedRisks: ["stress index is high", "resting pulse rate"]
     },
     {
       section: 'activity_profile',
-      expectedKeywords: ["Active Minutes: 15 mins/week", "Steps: 830 steps"],
+      expectedKeywords: ["Active Minutes: 15 mins/week", "Steps: 830 steps", "Active Calories Burned: 615 kcal", "Avg Daily Steps: Not enough data", "Avg Daily Active Calories: Not enough data"],
       expectedRisks: ["below the recommended clinical target", "step count is low"]
     },
     {
@@ -122,7 +123,7 @@ async function runAllTests() {
     },
     {
       section: 'care_team',
-      expectedKeywords: ["Samarth Gupta", "Endocrinologist"],
+      expectedKeywords: ["Samarth Gupta", "Endocrinologist", "Latest Doctor Note (General)", "Last Completed Consultation Note", "No note from last completed consultation"],
       expectedRisks: []
     }
   ];
@@ -157,6 +158,29 @@ async function runAllTests() {
       logError(`Section parser "${t.section}" threw unexpected error`, err);
       allPassed = false;
     }
+  }
+
+  // 3. Test Query Routing
+  logHeader("TESTING: Query routing via PersonaContextBuilder");
+  try {
+    const checkRouting = (query: string, expectedSection: string) => {
+      const sections = (PersonaContextBuilder as any).determineSectionsForQuery(query);
+      assert(sections.includes(expectedSection), `Query "${query}" correctly routes to "${expectedSection}"`);
+    };
+
+    checkRouting("What is my height?", "identity");
+    checkRouting("Who prescribed my Gluxit?", "medications_profile");
+    checkRouting("Am I obese?", "identity");
+    checkRouting("Am I obese?", "weight_and_composition_profile");
+    checkRouting("What is my name?", "identity");
+    checkRouting("What is my age?", "identity");
+    checkRouting("When was I born?", "identity");
+    checkRouting("What is my timezone?", "identity");
+    checkRouting("How many calories did I burn?", "activity_profile");
+    checkRouting("How many calories did I burn?", "nutrition_profile");
+  } catch (err) {
+    logError("Query routing suite threw unexpected exception", err);
+    allPassed = false;
   }
 
   logHeader("TESTING COMPLETE");

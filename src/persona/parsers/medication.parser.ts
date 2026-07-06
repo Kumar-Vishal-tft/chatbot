@@ -1,5 +1,6 @@
 import { safeGet } from '../safeGet';
 import { ParsedSection } from '../PersonaManager';
+import { formatEpochToDateString } from './careteam.parser';
 
 export function parseMedication(data: any): ParsedSection {
   const profile = safeGet(data?.medications_profile, {});
@@ -10,7 +11,10 @@ export function parseMedication(data: any): ParsedSection {
   const formattedMeds = activeMeds.length > 0
     ? activeMeds.map((m: any) => {
         const times = safeGet(m.intake_times, []).join(', ');
-        return `**${m.name}** (Freq: ${safeGet(m.frequency, "everyday")}, Times: ${times || "None Specified"})`;
+        const addedBy = safeGet(m.added_by, "").trim();
+        const prescriber = addedBy.toLowerCase() === 'patient' ? 'Patient added / self-reported' : (addedBy || 'N/A');
+        const startDate = m.start_date_epoch ? formatEpochToDateString(m.start_date_epoch) : "N/A";
+        return `**${m.name}** (Freq: ${safeGet(m.frequency, "everyday")}, Times: ${times || "None Specified"}, Added/Prescribed By: ${prescriber}, Start Date: ${startDate})`;
       }).join('; ')
     : "No active medications listed";
 

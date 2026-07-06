@@ -61,7 +61,7 @@ function getSimpleHash(str: string): string {
  * Creates or retrieves an existing Gemini Context Cache for a given system instruction.
  * Returns the full resource name (cacheName) if successful, or null if caching failed/was skipped.
  */
-export async function getOrCreateGeminiCache(systemInstruction: string, model: string = 'models/gemini-2.5-flash-lite'): Promise<string | null> {
+export async function getOrCreateGeminiCache(systemInstruction: string, model: string = 'models/gemini-2.5-flash'): Promise<string | null> {
   if (!GEMINI_API_KEY) {
     return null;
   }
@@ -219,7 +219,8 @@ export async function fetchGeminiResponse(
   history: Message[],
   profile?: OnboardingProfile,
   isExistingPatient: boolean = false,
-  sessionId?: string
+  sessionId?: string,
+  onboardingStep?: string
 ): Promise<string> {
   // Check if we have an active patient persona loaded AND the user is an existing patient
   const hasPersona = !!activePersonaManager.getRawPersona() && isExistingPatient;
@@ -249,7 +250,9 @@ export async function fetchGeminiResponse(
     }
   }
 
-  const isInOnboarding = !!profile && (
+  const onboardingCompleted = onboardingStep === 'completed' || isExistingPatient || !!rawPersona?.engagement?.onboarding_completed;
+
+  const isInOnboarding = !onboardingCompleted && !!profile && (
     !profile.name ||
     profile.age === undefined || profile.age === null || profile.age === '' ||
     !profile.gender ||
@@ -317,7 +320,7 @@ Remember: Be warm, clear, and genuinely helpful. Always recommend seeing a docto
   mappedHistory.push({ role: 'user', parts: [{ text: prompt }] });
 
   // Attempt to load or create a Gemini context cache for the system instructions
-  const cacheName = await getOrCreateGeminiCache(systemInstruction, 'models/gemini-2.5-flash-lite');
+  const cacheName = await getOrCreateGeminiCache(systemInstruction, 'models/gemini-2.5-flash');
 
   try {
     let response;
@@ -325,21 +328,21 @@ Remember: Be warm, clear, and genuinely helpful. Always recommend seeing a docto
     let attempts = 0;
     const maxAttempts = 2;
     let trimmed = '';
-    let lastUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
+    let lastUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
     while (attempts < maxAttempts) {
       try {
         attempts++;
-        const model = attempts === 1 ? 'gemini-2.5-flash-lite' : 'gemini-2.5-flash';
+        const model = 'gemini-2.5-flash';
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
         lastUrl = url;
 
         const requestBody: any = {
           contents: mappedHistory,
-          generationConfig: { temperature: 0.85, maxOutputTokens: 1024 },
+          generationConfig: { temperature: 0.85, maxOutputTokens: 8192 },
         };
 
-        if (cacheName && model === 'gemini-2.5-flash-lite') {
+        if (cacheName) {
           requestBody.cachedContent = cacheName;
         } else {
           requestBody.systemInstruction = { parts: [{ text: systemInstruction }] };
@@ -420,7 +423,7 @@ Use standard Markdown formatting (lists, bolding, headers, tables, strategic ale
                   { role: 'model', parts: [{ text: '[Requesting clinical data fallback...]' }] },
                   { role: 'user', parts: [{ text: `Here is the clinical data: ${JSON.stringify(agentData)}` }] }
                 ],
-                generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+                generationConfig: { temperature: 0.7, maxOutputTokens: 8192 },
                 systemInstruction: { parts: [{ text: finalInstruction }] }
               };
 
@@ -457,7 +460,7 @@ Use standard Markdown formatting (lists, bolding, headers, tables, strategic ale
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               contents: mappedHistory,
-              generationConfig: { temperature: 0.8, maxOutputTokens: 1024 },
+              generationConfig: { temperature: 0.8, maxOutputTokens: 8192 },
               systemInstruction: { parts: [{ text: fallbackInstruction }] }
             }),
           });
@@ -484,7 +487,7 @@ Use standard Markdown formatting (lists, bolding, headers, tables, strategic ale
         name: 'chat-response',
         input: prompt,
         output: trimmed,
-        model: 'gemini-2.5-flash-lite',
+        model: 'gemini-2.5-flash',
         userId: profile?.name || 'anonymous',
         sessionId: activeChatId || undefined,
         usageMetadata: data.usageMetadata
@@ -562,7 +565,7 @@ Strict rules:
   mappedHistory.push({ role: 'user', parts: [{ text: userInput }] });
 
   // Attempt to load or create a Gemini context cache for the system instructions
-  const cacheName = await getOrCreateGeminiCache(systemInstruction, 'models/gemini-2.5-flash-lite');
+  const cacheName = await getOrCreateGeminiCache(systemInstruction, 'models/gemini-2.5-flash');
 
   try {
     let response;
@@ -574,15 +577,15 @@ Strict rules:
     while (attempts < maxAttempts) {
       try {
         attempts++;
-        const model = attempts === 1 ? 'gemini-2.5-flash-lite' : 'gemini-2.5-flash';
+        const model = 'gemini-2.5-flash';
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
 
         const requestBody: any = {
           contents: mappedHistory,
-          generationConfig: { temperature: 0.9, maxOutputTokens: 1024 },
+          generationConfig: { temperature: 0.9, maxOutputTokens: 8192 },
         };
 
-        if (cacheName && model === 'gemini-2.5-flash-lite') {
+        if (cacheName) {
           requestBody.cachedContent = cacheName;
         } else {
           requestBody.systemInstruction = { parts: [{ text: systemInstruction }] };
@@ -627,7 +630,7 @@ Strict rules:
         name: 'greeting-response',
         input: userInput,
         output: trimmed,
-        model: 'gemini-2.5-flash-lite',
+        model: 'gemini-2.5-flash',
         userId: userName || 'anonymous',
         sessionId: activeChatId || undefined,
         usageMetadata: data.usageMetadata
@@ -823,6 +826,9 @@ export async function extractOnboardingEntities(
   feeling_note?: string;
   errors?: Record<string, string>;
 }> {
+  // Shared blocklist of words that should never be accepted as a name
+  const NAME_BLOCKLIST = /^(male|female|guy|man|girl|woman|skip|none|na|n\/a|nil|diabetes|hypertension|asthma|obesity|my|i|im|am|hi|hey|hello|yo|sup|ola|hola|hallo|what|how|why|when|where|who|which|help|not|having|celebrating|overweight|worried|svelte|eating|eat|food|rajma|thoughts|feeling|happy|sad|good|bad|sick|well|yes|no)$/i;
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 8000);
 
@@ -850,6 +856,8 @@ export async function extractOnboardingEntities(
     return res;
   }
 
+  const isNameStep = !currentStep || currentStep === 'asked_name' || currentStep === 'not_started';
+
   try {
     const response = await fetch('/api/extract', {
       method: 'POST',
@@ -864,7 +872,12 @@ export async function extractOnboardingEntities(
       if (data.success && data.extracted) {
         const ext = data.extracted;
 
-        if (ext.name?.valid && ext.name.value) res.name = ext.name.value;
+        if (isNameStep && ext.name?.valid && ext.name.value) {
+          const nameVal = ext.name.value.trim();
+          if (!NAME_BLOCKLIST.test(nameVal) && !hasProfanity(nameVal)) {
+            res.name = nameVal;
+          }
+        }
         else if (ext.name?.reason) errors.name = ext.name.reason;
 
         if (ext.age?.valid && ext.age.value) res.age = ext.age.value;
@@ -903,12 +916,8 @@ export async function extractOnboardingEntities(
   // run the context-aware fallback logic to retrieve the entity.
   const lower = content.toLowerCase().trim();
 
-  // Shared blocklist of words that should never be accepted as a name, used by
-  // both the "I am X" pattern match and the bare single-word fallback below.
-  const NAME_BLOCKLIST = /^(male|female|guy|man|girl|woman|skip|none|na|n\/a|nil|diabetes|hypertension|asthma|obesity|my|i|im|am|hi|hey|hello|yo|sup|ola|hola|hallo|what|how|why|when|where|who|which|help)$/i;
-
   // 1. Context-aware/Fallback: Name
-  if (!res.name && (!currentStep || currentStep === 'asked_name')) {
+  if (!res.name && isNameStep) {
     const nameMatch = content.match(/\b(?:i am|i'm|name is|call me|myself)\s+([A-Za-z]{2,15})\b/i);
     if (nameMatch && nameMatch[1]) {
       const nameVal = nameMatch[1].trim();

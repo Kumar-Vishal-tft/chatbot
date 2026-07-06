@@ -7,6 +7,18 @@ export function parseNutrition(data: any): ParsedSection {
   const macros = safeGet(lastMeal?.macronutrients, {});
   const glycemic = safeGet(lastMeal?.glycemic_metrics, {});
 
+  const rolling30 = safeGet(profile?.rolling_30_day_summary, {});
+  const rolling7 = safeGet(profile?.rolling_7_day_averages, {});
+
+  const totalMealsLogged = safeGet(rolling30?.total_meals_logged, null);
+  const avgCalories = safeGet(rolling7?.calories_kcal_per_day, null);
+  const calorieGoal = safeGet(rolling30?.calorie_goal_kcal, null);
+
+  const avgFat = safeGet(rolling7?.fat_g_per_day, null);
+  const avgCarbs = safeGet(rolling7?.carbs_g_per_day, null);
+  const avgProtein = safeGet(rolling7?.protein_g_per_day, null);
+  const avgFiber = safeGet(rolling7?.fiber_g_per_day, null);
+
   const mealName = safeGet(lastMeal?.meal_name, "None recorded");
   const mealType = safeGet(lastMeal?.meal_type, "N/A");
   const qualityScore = safeGet(lastMeal?.quality_score, null);
@@ -31,7 +43,11 @@ export function parseNutrition(data: any): ParsedSection {
 - **Last Logged Meal:** "${mealName}" (${mealType})
 - **Meal Quality Score:** ${qualityScore ? `${qualityScore}/10` : "N/A"}
 - **Macros Distribution:** Calories: ${cal ? `${Math.round(cal)} kcal` : "N/A"}, Protein: ${protein}g, Carbs: ${carbs}g, Fat: ${fat}g, Fiber: ${fiber}g
-- **Glycemic Impact:** Glycemic Load: ${gl || "N/A"} (${glCategory})`;
+- **Glycemic Impact:** Glycemic Load: ${gl || "N/A"} (${glCategory})
+- **Logged Meals (30 Days):** ${totalMealsLogged !== null ? `${totalMealsLogged} meal${totalMealsLogged === 1 ? '' : 's'}` : "Not Available"}
+- **Average Daily Calorie Intake:** ${avgCalories !== null ? `${avgCalories} kcal` : "Not enough data"}
+- **Average Daily Nutrition (7 Days):** Calories: ${avgCalories !== null ? `${avgCalories} kcal` : "Not enough data"}, Protein: ${avgProtein ? `${avgProtein}g` : "N/A"}, Carbs: ${avgCarbs ? `${avgCarbs}g` : "N/A"}, Fat: ${avgFat ? `${avgFat}g` : "N/A"}, Fiber: ${avgFiber ? `${avgFiber}g` : "N/A"}
+- **Calorie Goal Compliance:** Goal: ${calorieGoal ? `${calorieGoal} kcal` : "N/A"}`;
 
   const risks: string[] = [];
   const recommendations: string[] = [];

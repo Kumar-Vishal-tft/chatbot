@@ -170,7 +170,7 @@ Rules:
     while (attempts < maxAttempts) {
       try {
         attempts++;
-        const model = attempts === 1 ? 'gemini-2.5-flash-lite' : 'gemini-2.5-flash';
+        const model = 'gemini-2.5-flash';
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
         response = await fetch(url, {
           method: 'POST',

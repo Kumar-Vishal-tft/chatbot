@@ -30,10 +30,23 @@ export function parseFaceScan(data: any): ParsedSection {
   const stressDirection = safeGet(trends?.stress_direction, "stable");
   const wellnessDirection = safeGet(trends?.wellness_direction, "stable");
 
+  const labEstimates = safeGet(latest?.lab_estimates, {});
+  const faceHba1c = safeGet(labEstimates?.hba1c_percent, null);
+  const faceHb = safeGet(labEstimates?.hemoglobin_gdl, null);
+
+  let faceEag = null;
+  if (faceHba1c) {
+    const numHba1c = Number(faceHba1c);
+    if (!isNaN(numHba1c)) {
+      faceEag = Math.round(28.7 * numHba1c - 46.7);
+    }
+  }
+
   const summary = `Face Scan Physiological Vitals Profile:
 - **Vital Signs Extracted:** Pulse Rate: ${pulse ? `${pulse} bpm` : "N/A"}, Respiration Rate: ${resp ? `${resp} rpm` : "N/A"}, SpO2: ${spo2 ? `${spo2}%` : "N/A"}
 - **Wellness & Stress Metrics:** Wellness Score: ${wellnessIndex || "N/A"} (${wellnessLevel}, trend: ${wellnessDirection}), Stress Index: ${stressIndex || "N/A"} (${stressLevel}, trend: ${stressDirection})
-- **Autonomic Nervous System & HRV:** SDNN: ${sdnn ? `${sdnn}ms` : "N/A"}, RMSSD: ${rmssd ? `${rmssd}ms` : "N/A"}, SNS Index: ${sns || "N/A"}, PNS Index: ${pns || "N/A"}`;
+- **Autonomic Nervous System & HRV:** SDNN: ${sdnn ? `${sdnn}ms` : "N/A"}, RMSSD: ${rmssd ? `${rmssd}ms` : "N/A"}, SNS Index: ${sns || "N/A"}, PNS Index: ${pns || "N/A"}
+- **Physiological Lab Estimates (Face Scan):** Estimated HbA1c: ${faceHba1c ? `${faceHba1c}%` : "N/A"}${faceEag !== null ? ` (Estimated Average Glucose (eAG): ${faceEag} mg/dL)` : ""}, Estimated Hemoglobin: ${faceHb ? `${faceHb} g/dL` : "N/A"}`;
 
   const risks: string[] = [];
   const recommendations: string[] = [];

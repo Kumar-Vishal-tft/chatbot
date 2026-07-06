@@ -18,6 +18,13 @@ export function parseLabs(data: any): ParsedSection {
   const hdl = lipids?.hdl_cholesterol?.value;
 
   const hba1c = hematology?.hba1c?.value;
+  let eagVal = null;
+  if (hba1c) {
+    const numHba1c = Number(hba1c);
+    if (!isNaN(numHba1c)) {
+      eagVal = Math.round(28.7 * numHba1c - 46.7);
+    }
+  }
   const fastingGlucose = hematology?.glucose_fasting?.value;
   const hb = hematology?.["hemoglobin_(hb)"]?.value || hematology?.hemoglobin?.value;
   const vitD = hematology?.["vitamin_d,_25_hydroxy"]?.value || hematology?.vitamin_d?.value;
@@ -27,7 +34,7 @@ export function parseLabs(data: any): ParsedSection {
 
   const summary = `Lab Results Profile (Latest Report: "${reportName}" dated ${reportDate}):
 - **Lipid Panel:** Total Cholesterol: ${tc ? `${tc} mg/dL (ref: <200)` : "N/A"}, LDL: ${ldl ? `${ldl} mg/dL (ref: <100)` : "N/A"}, Triglycerides: ${tg ? `${tg} mg/dL (ref: <150)` : "N/A"}, HDL: ${hdl ? `${hdl} mg/dL (ref: >50)` : "N/A"}
-- **Glycemic Markers:** HbA1c: ${hba1c ? `${hba1c}% (ref: 4.0 - 5.6)` : "N/A"}, Fasting Glucose: ${fastingGlucose ? `${fastingGlucose} mg/dL (ref: 70 - 100)` : "N/A"}
+- **Glycemic Markers:** HbA1c: ${hba1c ? `${hba1c}% (ref: 4.0 - 5.6)` : "N/A"}, Fasting Glucose: ${fastingGlucose ? `${fastingGlucose} mg/dL (ref: 70 - 100)` : "N/A"}${eagVal !== null ? `, Estimated Average Glucose (eAG): ${eagVal} mg/dL` : ""}
 - **Hormones & Vitals:** TSH: ${tsh ? `${tsh} µIU/mL (ref: 0.27 - 4.2)` : "N/A"}, T3: ${t3 ? `${t3} ng/mL (ref: 0.8 - 2.0)` : "N/A"}, T4: ${t4 ? `${t4} µg/dL (ref: 5.1 - 14.1)` : "N/A"}
 - **Nutritional Biomarkers:** Hemoglobin (Hb): ${hb ? `${hb} g/dL (ref: 12.0 - 15.0)` : "N/A"}, Vitamin D3: ${vitD ? `${vitD} nmol/L (ref: 75.0 - 250.0)` : "N/A"}`;
 

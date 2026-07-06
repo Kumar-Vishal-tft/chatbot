@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
 
     const generation = trace.generation({
       name: 'gemini-generation',
-      model: model || 'gemini-2.5-flash-lite',
+      model: model || 'gemini-2.5-flash',
       input: input,
       output: output,
     });

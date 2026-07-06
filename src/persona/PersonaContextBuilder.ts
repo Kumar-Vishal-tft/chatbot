@@ -10,7 +10,7 @@ export class PersonaContextBuilder {
 
     // 1. Diabetes & Glycemic Routing
     if (
-      /\b(diabetic|diabetes|glucose|blood sugar|sugar|insulin|cgm|libre|glucometer|fasting|post-meal|gluxit)\b/i.test(q)
+      /\b(diabetic|diabetes|glucose|blood sugar|sugar|insulin|cgm|libre|glucometer|fasting|post-meal|gluxit)s?\b/i.test(q)
     ) {
       sections.add('cgm_profile');
       sections.add('glucometer_profile');
@@ -20,7 +20,7 @@ export class PersonaContextBuilder {
 
     // 2. Cardiovascular & Blood Pressure Routing
     if (
-      /\b(blood pressure|bp|hypertension|hypertensive|systolic|diastolic|heart|pulse|cardio)\b/i.test(q)
+      /\b(blood pressure|bp|hypertension|hypertensive|systolic|diastolic|heart|pulse|cardio)s?\b/i.test(q)
     ) {
       sections.add('blood_pressure_profile');
       sections.add('face_scan_profile');
@@ -29,7 +29,7 @@ export class PersonaContextBuilder {
 
     // 3. Labs, Lipids, Thyroid & Cholesterol Routing
     if (
-      /\b(cholesterol|lipid|ldl|hdl|triglycerides|tsh|thyroid|t3|t4|hypothyroidism|biomarker|lab|report|blood report|hemoglobin|anemia|vitamin|b12|kidney|urea|creatinine)\b/i.test(q)
+      /\b(cholesterol|lipid|ldl|hdl|triglycerides|tsh|thyroid|t3|t4|hypothyroidism|biomarker|lab|report|blood report|hemoglobin|anemia|vitamin|b12|kidney|urea|creatinine)s?\b/i.test(q)
     ) {
       sections.add('lab_results_profile');
       sections.add('clinical_context');
@@ -37,7 +37,7 @@ export class PersonaContextBuilder {
 
     // 4. Medication & Adherence Routing
     if (
-      /\b(medication|medicine|pill|tablet|prescribe|prescription|dose|adherence|take|took|missed)\b/i.test(q)
+      /\b(medication|medicine|pill|tablet|prescribe|prescription|dose|adherence|take|took|missed)s?\b/i.test(q)
     ) {
       sections.add('medications_profile');
       sections.add('care_team');
@@ -45,7 +45,7 @@ export class PersonaContextBuilder {
 
     // 5. Nutrition & Weight Routing
     if (
-      /\b(nutrition|diet|meal|food|eat|calories|kcal|macros|protein|carbs|fat|fiber|breakfast|lunch|dinner|weight|bmi|bmr|lose|gain|obese|obesity|body fat|muscle)\b/i.test(q)
+      /\b(nutrition|diet|meal|food|eat|calories|kcal|macros|protein|carbs|fat|fiber|breakfast|lunch|dinner|weight|height|tall|bmi|bmr|lose|gain|obese|obesity|body fat|muscle)s?\b/i.test(q)
     ) {
       sections.add('nutrition_profile');
       sections.add('weight_and_composition_profile');
@@ -54,7 +54,7 @@ export class PersonaContextBuilder {
 
     // 6. Symptoms & History Routing
     if (
-      /\b(symptom|pain|headache|migraine|dehydration|dizziness|nausea|fatigue|cough|rash|feel|ill|sick|hurt)\b/i.test(q)
+      /\b(symptom|pain|headache|migraine|dehydration|dizziness|nausea|fatigue|cough|rash|feel|ill|sick|hurt)s?\b/i.test(q)
     ) {
       sections.add('symptoms_profile');
       sections.add('clinical_context');
@@ -63,16 +63,23 @@ export class PersonaContextBuilder {
 
     // 7. Activity & Steps Routing
     if (
-      /\b(exercise|workout|activity|steps|walk|run|gym|training|active|sleep|rest|hours)\b/i.test(q)
+      /\b(exercise|workout|activity|steps|walk|run|gym|training|active|inactive|sleep|rest|hours|burn|burned|calorie|calories)s?\b/i.test(q)
     ) {
       sections.add('activity_profile');
     }
 
     // 8. Care Team & Doctors Routing
     if (
-      /\b(doctor|physician|endocrinologist|samarth|gupta|consult|consultation|program|renew|clinic)\b/i.test(q)
+      /\b(doctor|physician|endocrinologist|samarth|gupta|consult|consultation|program|programme|renew|clinic|join|enroll|member|start)s?(?:ed|ing|ment|ship)?\b/i.test(q)
     ) {
       sections.add('care_team');
+    }
+
+    // 9. Personal Identity & Profile Routing
+    if (
+      /\b(name|age|years old|gender|sex|dob|birth|born|phone|mobile|number|timezone|identity|profile|myself|who am i|who i am)s?\b/i.test(q)
+    ) {
+      sections.add('identity');
     }
 
     return Array.from(sections);
