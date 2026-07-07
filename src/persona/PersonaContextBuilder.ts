@@ -82,6 +82,14 @@ export class PersonaContextBuilder {
       sections.add('identity');
     }
 
+    // 10. Face Scan & Physiological Vitals Routing
+    if (
+      /\b(face scan|face_scan|scan|oxygen|spo2|hrv|sdnn|rmssd|nervous system|sns|pns|autonomic|sympathetic|parasympathetic|tension|workload|arterial|stress|wellness)s?\b/i.test(q)
+    ) {
+      sections.add('face_scan_profile');
+      sections.add('clinical_context');
+    }
+
     return Array.from(sections);
   }
 

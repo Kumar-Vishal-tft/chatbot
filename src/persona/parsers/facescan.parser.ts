@@ -26,6 +26,13 @@ export function parseFaceScan(data: any): ParsedSection {
 
   const sns = safeGet(autonomic?.sns_index, null);
   const pns = safeGet(autonomic?.pns_index, null);
+  const snsZone = safeGet(autonomic?.sns_zone, "Unknown");
+  const pnsZone = safeGet(autonomic?.pns_zone, "Unknown");
+
+  const chRisk = safeGet(risk?.high_total_cholesterol_risk, null);
+  const dbRisk = safeGet(risk?.diabetes_risk, null);
+  const htRisk = safeGet(risk?.hypertension_risk, null);
+  const hbRisk = safeGet(risk?.low_hemoglobin_risk, null);
 
   const stressDirection = safeGet(trends?.stress_direction, "stable");
   const wellnessDirection = safeGet(trends?.wellness_direction, "stable");
@@ -45,8 +52,9 @@ export function parseFaceScan(data: any): ParsedSection {
   const summary = `Face Scan Physiological Vitals Profile:
 - **Vital Signs Extracted:** Pulse Rate: ${pulse ? `${pulse} bpm` : "N/A"}, Respiration Rate: ${resp ? `${resp} rpm` : "N/A"}, SpO2: ${spo2 ? `${spo2}%` : "N/A"}
 - **Wellness & Stress Metrics:** Wellness Score: ${wellnessIndex || "N/A"} (${wellnessLevel}, trend: ${wellnessDirection}), Stress Index: ${stressIndex || "N/A"} (${stressLevel}, trend: ${stressDirection})
-- **Autonomic Nervous System & HRV:** SDNN: ${sdnn ? `${sdnn}ms` : "N/A"}, RMSSD: ${rmssd ? `${rmssd}ms` : "N/A"}, SNS Index: ${sns || "N/A"}, PNS Index: ${pns || "N/A"}
-- **Physiological Lab Estimates (Face Scan):** Estimated HbA1c: ${faceHba1c ? `${faceHba1c}%` : "N/A"}${faceEag !== null ? ` (Estimated Average Glucose (eAG): ${faceEag} mg/dL)` : ""}, Estimated Hemoglobin: ${faceHb ? `${faceHb} g/dL` : "N/A"}`;
+- **Autonomic Nervous System & HRV:** SDNN: ${sdnn ? `${sdnn}ms` : "N/A"}, RMSSD: ${rmssd ? `${rmssd}ms` : "N/A"}, Autonomic Balance (SNS Index: ${sns || "N/A"}, SNS Zone: ${snsZone}, PNS Index: ${pns || "N/A"}, PNS Zone: ${pnsZone})
+- **Physiological Lab Estimates (Face Scan):** Estimated HbA1c: ${faceHba1c ? `${faceHba1c}%` : "N/A"}${faceEag !== null ? ` (Estimated Average Glucose (eAG): ${faceEag} mg/dL)` : ""}, Estimated Hemoglobin: ${faceHb ? `${faceHb} g/dL` : "N/A"}
+- **Face Scan Risk Scores:** High Total Cholesterol Risk: ${chRisk || "N/A"}, Diabetes Risk: ${dbRisk || "N/A"}, Hypertension Risk: ${htRisk || "N/A"}, Low Hemoglobin Risk: ${hbRisk || "N/A"}`;
 
   const risks: string[] = [];
   const recommendations: string[] = [];

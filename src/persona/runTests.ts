@@ -103,7 +103,7 @@ async function runAllTests() {
     },
     {
       section: 'face_scan_profile',
-      expectedKeywords: ["Pulse Rate: 95 bpm", "Stress Index: 294", "Physiological Lab Estimates (Face Scan)", "Estimated HbA1c: 5.72%", "Estimated Average Glucose (eAG): 117 mg/dL"],
+      expectedKeywords: ["Pulse Rate: 95 bpm", "Stress Index: 294", "Physiological Lab Estimates (Face Scan)", "Estimated HbA1c: 5.72%", "Estimated Average Glucose (eAG): 117 mg/dL", "SNS Zone: high", "High Total Cholesterol Risk: low"],
       expectedRisks: ["stress index is high", "resting pulse rate"]
     },
     {
@@ -178,6 +178,10 @@ async function runAllTests() {
     checkRouting("What is my timezone?", "identity");
     checkRouting("How many calories did I burn?", "activity_profile");
     checkRouting("How many calories did I burn?", "nutrition_profile");
+    checkRouting("What was my oxygen level in my face scan?", "face_scan_profile");
+    checkRouting("What is my HRV?", "face_scan_profile");
+    checkRouting("What does my face scan say about my nervous system?", "face_scan_profile");
+    checkRouting("What is my cholesterol risk from face scan?", "face_scan_profile");
   } catch (err) {
     logError("Query routing suite threw unexpected exception", err);
     allPassed = false;
