@@ -13,6 +13,7 @@ interface UploadModalProps {
 }
 
 export default function UploadModal({ isOpen, onClose, onUploadSuccess, uploadType = 'report' }: UploadModalProps) {
+  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -35,6 +36,17 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess, uploadTy
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (file.size > MAX_FILE_SIZE) {
+        setErrorMessage('File size exceeds the maximum allowed limit of 10 MB. Please upload a smaller file.');
+        setSelectedFile(null);
+        setIsCompleted(false);
+        setPasswordRequired(false);
+        setPassword('');
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+        return;
+      }
       setSelectedFile(file);
       setIsCompleted(false);
       setErrorMessage(null);
@@ -51,6 +63,17 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess, uploadTy
     e.preventDefault();
     const file = e.dataTransfer.files?.[0];
     if (file) {
+      if (file.size > MAX_FILE_SIZE) {
+        setErrorMessage('File size exceeds the maximum allowed limit of 10 MB. Please upload a smaller file.');
+        setSelectedFile(null);
+        setIsCompleted(false);
+        setPasswordRequired(false);
+        setPassword('');
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+        return;
+      }
       setSelectedFile(file);
       setIsCompleted(false);
       setErrorMessage(null);
@@ -61,6 +84,10 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess, uploadTy
 
   const handleUploadSubmit = async () => {
     if (!selectedFile) return;
+    if (selectedFile.size > MAX_FILE_SIZE) {
+      setErrorMessage('File size exceeds the maximum allowed limit of 10 MB. Please upload a smaller file.');
+      return;
+    }
     setIsUploading(true);
     setErrorMessage(null);
     setUploadProgress(15);
@@ -102,8 +129,24 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess, uploadTy
       clearInterval(progressInterval);
 
       if (!response.ok) {
+        if (response.status === 413) {
+          throw new Error('File size exceeds the maximum allowed limit of 10 MB. Please upload a smaller file.');
+        }
+        if (response.status >= 500) {
+          throw new Error("We're unable to process your report at the moment. Please try again after some time.");
+        }
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || 'Failed to classify document');
+        const detail = errorData.detail || '';
+        if (
+          detail.includes('503') ||
+          detail.includes('UNAVAILABLE') ||
+          detail.includes('high demand') ||
+          detail.includes('Backend classification failed') ||
+          detail.includes('Failed to classify')
+        ) {
+          throw new Error("We're unable to process your report at the moment. Please try again after some time.");
+        }
+        throw new Error(detail || 'Failed to classify document');
       }
 
       const data = await response.json();
@@ -143,7 +186,19 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess, uploadTy
       clearInterval(progressInterval);
       setIsUploading(false);
       setUploadProgress(0);
-      setErrorMessage(err.message || 'An error occurred during file classification.');
+      
+      const errMsg = err.message || '';
+      if (
+        errMsg.toLowerCase().includes('failed to fetch') ||
+        errMsg.toLowerCase().includes('fetch failed') ||
+        errMsg.toLowerCase().includes('503') ||
+        errMsg.toLowerCase().includes('unavailable') ||
+        errMsg.toLowerCase().includes('demand')
+      ) {
+        setErrorMessage("We're unable to process your report at the moment. Please try again after some time.");
+      } else {
+        setErrorMessage(errMsg || 'An error occurred during file classification.');
+      }
     }
   };
 

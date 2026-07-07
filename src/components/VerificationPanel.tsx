@@ -22,7 +22,7 @@ interface VerificationPanelProps {
 
 type PanelStep = 'phone' | 'otp' | 'loading' | 'success';
 
-const OTP_LENGTH = 6;
+const OTP_LENGTH = 4;
 const RESEND_SECONDS = 30;
 
 /* ─── Helpers ──────────────────────────────────────────── */
@@ -233,17 +233,8 @@ export default function VerificationPanel({ onVerified, onClose }: VerificationP
   /* ── OTP submit ── */
   const submitOtp = (digits: string[]) => {
     const code = digits.join('');
-    // Demo: accept any 6-digit code
     if (code.length < OTP_LENGTH || digits.some(d => !d)) {
-      setOtpError('Please enter the complete 6-digit code.');
-      return;
-    }
-    // For demo, treat "000000" as wrong
-    if (code === '000000') {
-      captureAnalyticsEvent('patient_verification_failed', { reason: 'Blocked Demo OTP Code' });
-      setOtpError("That code doesn't look right. Try again.");
-      setOtp(Array(OTP_LENGTH).fill(''));
-      setTimeout(() => otpRefs.current[0]?.focus(), 50);
+      setOtpError('Please enter the complete 4-digit code.');
       return;
     }
     setStep('loading');
@@ -482,7 +473,7 @@ export default function VerificationPanel({ onVerified, onClose }: VerificationP
                         ref={el => { otpRefs.current[i] = el; }}
                         type="text"
                         inputMode="numeric"
-                        maxLength={6}
+                        maxLength={OTP_LENGTH}
                         autoComplete="one-time-code"
                         value={otp[i]}
                         onChange={e => handleOtpChange(i, e.target.value)}

@@ -214,6 +214,60 @@ export function isAbusiveOrWarningMessage(msg: Message): boolean {
 
 // ── Gemini Chat Response ───────────────────────────────────────────────────
 
+function cleanAssistantMessage(content: string): string {
+  // 1. Split by standard markdown separator first (most reliable for clinical responses)
+  if (content.includes('\n\n---\n\n')) {
+    content = content.split('\n\n---\n\n')[0];
+  }
+  
+  // 2. Strip follow-up chips if present
+  if (content.includes('[FollowUps:')) {
+    content = content.split('[FollowUps:')[0].trim();
+  }
+
+  // 3. Strip onboarding questions
+  const onboardingKeywords = [
+    'What should I call you?',
+    'how old are you?',
+    'what is your gender?',
+    "What's your gender?",
+    'what is your mobile/phone number?',
+    'what would you most like help with?',
+    'do you have any existing medical conditions?',
+    'how are you feeling?',
+    'Additional Note on how you are feeling?',
+    "You're all set"
+  ];
+
+  let cleaned = content;
+  for (const keyword of onboardingKeywords) {
+    const index = cleaned.indexOf(keyword);
+    if (index !== -1) {
+      let cleanText = cleaned.substring(0, index).trim();
+      if (cleanText.endsWith('**')) {
+        cleanText = cleanText.slice(0, -2).trim();
+      }
+      const prefixes = [
+        'Also —',
+        'Also — **',
+        'Got it.',
+        'Thanks!',
+        'Noted!',
+        'Nice to meet you,',
+        'Welcome to YHealth'
+      ];
+      for (const prefix of prefixes) {
+        if (cleanText.endsWith(prefix)) {
+          cleanText = cleanText.substring(0, cleanText.length - prefix.length).trim();
+        }
+      }
+      cleaned = cleanText;
+    }
+  }
+
+  return cleaned.trim();
+}
+
 export async function fetchGeminiResponse(
   prompt: string,
   history: Message[],
@@ -312,10 +366,20 @@ Remember: Be warm, clear, and genuinely helpful. Always recommend seeing a docto
   console.log("fetchGeminiResponse history before filter:", JSON.stringify(history, null, 2));
   const cleanHistory = history.filter((msg) => !isAbusiveOrWarningMessage(msg));
   console.log("fetchGeminiResponse cleanHistory:", JSON.stringify(cleanHistory, null, 2));
-  const mappedHistory = cleanHistory.map((msg) => ({
-    role: msg.sender === 'user' ? 'user' : 'model',
-    parts: [{ text: msg.content }],
-  }));
+
+  const mappedHistory: { role: string; parts: { text: string }[] }[] = [];
+  for (const msg of cleanHistory) {
+    let content = msg.content;
+    if (msg.sender === 'assistant') {
+      content = cleanAssistantMessage(content);
+    }
+    if (content.trim()) {
+      mappedHistory.push({
+        role: msg.sender === 'user' ? 'user' : 'model',
+        parts: [{ text: content.trim() }],
+      });
+    }
+  }
 
   mappedHistory.push({ role: 'user', parts: [{ text: prompt }] });
 
@@ -557,10 +621,19 @@ Strict rules:
 
   // Build history context for Gemini (so it sees the conversation)
   const cleanHistory = history.filter((msg) => !isAbusiveOrWarningMessage(msg));
-  const mappedHistory = cleanHistory.map((msg) => ({
-    role: msg.sender === 'user' ? 'user' : 'model',
-    parts: [{ text: msg.content }],
-  }));
+  const mappedHistory: { role: string; parts: { text: string }[] }[] = [];
+  for (const msg of cleanHistory) {
+    let content = msg.content;
+    if (msg.sender === 'assistant') {
+      content = cleanAssistantMessage(content);
+    }
+    if (content.trim()) {
+      mappedHistory.push({
+        role: msg.sender === 'user' ? 'user' : 'model',
+        parts: [{ text: content.trim() }],
+      });
+    }
+  }
   // Append the actual greeting the user just typed
   mappedHistory.push({ role: 'user', parts: [{ text: userInput }] });
 
